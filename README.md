@@ -9,11 +9,11 @@
 - A real Linux system (*WSL isn't supported yet*).
 - Node.js 18+, Python 3.12+ with `venv`, and `setcap` (`libcap2-bin` on Debian/Ubuntu).
 - A Switch 2, **on the same Wi-Fi network as the Linux system**.
-- **Your own `prod.keys`, dumped from your own Switch.** Place it at the repository root before running.
+- **Your own `prod.keys`, dumped from your own Switch 1.** Place it at the repository root before running.
 
 ## Why ?
 
-- No need for Pico, Android, ESP or anything, just Linux and a Switch !
+- No need for Pico, Android, ESP etc !
 - Whole payload sent in 4s instead of 15min+ :D
 
 ## Usage
