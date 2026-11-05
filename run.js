@@ -3,8 +3,10 @@
 const { spawn } = require("child_process");
 const fs = require("fs");
 const net = require("net");
+const os = require("os");
 const path = require("path");
 const readline = require("readline/promises");
+const { setTimeout: sleep } = require("timers/promises");
 const compress = require("./compress");
 
 const PAYLOAD_PATH = path.join(__dirname, "payloads", "core.js");
@@ -50,6 +52,69 @@ function selectPhy(phy) {
   return radios[0];
 }
 
+function addressNumber(ip) {
+  return ip.split(".").reduce((value, part) => (value << 8) | Number(part), 0) >>> 0;
+}
+
+function localCandidates(phy) {
+  const interfaces = os.networkInterfaces();
+  const targets = new Set();
+
+  for (const [name, addresses] of Object.entries(interfaces)) {
+    let radio;
+    try {
+      radio = path.basename(fs.realpathSync(`/sys/class/net/${name}/phy80211`));
+    } catch {
+      continue;
+    }
+    if (radio !== phy) continue;
+
+    for (const address of addresses) {
+      if (address.family !== "IPv4" || address.internal || !address.netmask) continue;
+
+      const mask = addressNumber(address.netmask);
+      const count = (~mask >>> 0) + 1;
+      if (count < 4 || count > 512) continue;
+
+      const network = addressNumber(address.address) & mask;
+      for (let offset = 1; offset < count - 1; offset++) {
+        const value = (network + offset) >>> 0;
+        const ip = [24, 16, 8, 0].map((shift) => (value >>> shift) & 255).join(".");
+        if (ip !== address.address) targets.add(ip);
+      }
+    }
+  }
+  return [...targets];
+}
+
+function probeLoader(ip) {
+  return new Promise((resolve) => {
+    let response = "";
+    const sock = net.createConnection({ host: ip, port: PORT }, () => sock.end("1"));
+    sock.setTimeout(1500, () => sock.destroy());
+    sock.on("data", (chunk) => {
+      response += chunk;
+      if (response.length > 4096) sock.destroy();
+    });
+    sock.once("error", () => resolve(false));
+    sock.once("close", () => resolve(response.includes("Executed successfully")));
+  });
+}
+
+async function discoverLoader(phy, deadline = Infinity) {
+  const candidates = localCandidates(phy);
+  const matches = [];
+  let next = 0;
+  const workers = Array.from({ length: Math.min(32, candidates.length) }, async () => {
+    while (next < candidates.length && Date.now() < deadline) {
+      const ip = candidates[next++];
+      if (await probeLoader(ip)) matches.push(ip);
+    }
+  });
+  await Promise.all(workers);
+  return next < candidates.length ? [] : matches;
+}
+
 function runCommand(command, args, input) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -84,6 +149,7 @@ async function injectViaLDN(opts) {
     throw new Error(`Place your own prod.keys, dumped from your Switch, at ${opts.keys}.`);
   }
   const phy = selectPhy(opts.phy);
+  opts.phy = phy;
   const lines = await compress(fs.readFileSync(PAYLOAD_PATH, "utf8"));
   console.log(`${lines.length} chat lines ready.`);
   const args = [
@@ -118,6 +184,34 @@ async function askSwitchIP(prompt, value) {
   }
 }
 
+async function waitForLoader(opts, prompt) {
+  const deadline = Date.now() + 60000;
+  console.log(`Waiting for the Remote JS Loader on port ${PORT}...`);
+
+  while (Date.now() < deadline) {
+    if (opts.switchIP) {
+      if (await probeLoader(opts.switchIP)) return opts.switchIP;
+    } else {
+      const matches = await discoverLoader(opts.phy, deadline);
+      if (matches.length === 1) return matches[0];
+      if (matches.length > 1) {
+        console.log(`Multiple loaders found: ${matches.join(", ")}.`);
+        opts.switchIP = await askSwitchIP(prompt, null);
+      }
+    }
+
+    const remaining = deadline - Date.now();
+    if (remaining > 0) await sleep(Math.min(2000, remaining));
+  }
+
+  if (!opts.switchIP && prompt) {
+    console.log("Automatic discovery timed out. Enter the console IP shown by the loader.");
+    opts.switchIP = await askSwitchIP(prompt, null);
+    return waitForLoader(opts, prompt);
+  }
+  throw new Error(`Remote JS Loader not found on port ${PORT}. Check the console and Wi-Fi connection.`);
+}
+
 async function main(args = process.argv.slice(2)) {
   const opts = parseArgs(args);
   if (opts.help) {
@@ -126,17 +220,35 @@ async function main(args = process.argv.slice(2)) {
     return;
   }
   if (opts.payload && !fs.existsSync(opts.payload)) throw new Error(`Payload not found: ${opts.payload}`);
-  if (!opts.skipInject) await injectViaLDN(opts);
-
   const prompt = process.stdin.isTTY ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
   try {
+    if (!opts.skipInject) {
+      await injectViaLDN(opts);
+      opts.switchIP = await waitForLoader(opts, prompt);
+      console.log(`Remote JS Loader ready at ${opts.switchIP}:${PORT}`);
+    }
+
     if (opts.payload) {
       opts.switchIP = await askSwitchIP(prompt, opts.switchIP);
       await sendPayload(opts.switchIP, opts.payload);
     }
     if (prompt) {
-      const answer = await prompt.question("Run the persistent installer? This replaces the game's single-player saves. [y/N] ");
+      const answer = await prompt.question("Run the persistent installer? [y/N] ");
       if (answer.trim().toLowerCase() === "y") {
+        if (!opts.switchIP) {
+          let phy = opts.phy;
+          if (!phy) {
+            try {
+              phy = selectPhy();
+            } catch {
+              // A manual IP is still available when radio discovery fails.
+            }
+          }
+          if (phy) {
+            const matches = await discoverLoader(phy);
+            if (matches.length === 1) opts.switchIP = matches[0];
+          }
+        }
         const ip = await askSwitchIP(prompt, opts.switchIP);
         await runCommand(INSTALLER_PYTHON, [
           path.join(__dirname, "installer", "install.py"), ip, String(PORT), PAYLOAD_PATH,

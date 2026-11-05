@@ -38,9 +38,17 @@ npm start
 
 ### 4. Persist the exploit (optional)
 
-Once the Remote JS Loader is running on the console, you will be prompted on the Linux system to launch the persistent installer: type **`y`** to continue, or **`n`** to finish.
+After injection, the PC waits for the Remote JS Loader to respond on port 9026 before offering the persistent installer. Type **`y`** to install, or **`n`** to finish. If automatic discovery cannot identify the console, enter the IP displayed by the loader.
 
 It will replace the game's single-player saves. Keep the game open until it prints **`INSTALL DONE`**. Afterwards, restart the game and select **Load Game** to start the loader again :tada:.
+
+### Send JS payloads
+
+Once the Remote JS Loader is running, send a JS file to the console IP shown on screen:
+
+```sh
+node send_payload.js <console-ip> payloads/helloworld.js
+```
 
 ## How it works
 
@@ -49,7 +57,7 @@ It will replace the game's single-player saves. Keep the game open until it prin
 1. Compress `payloads/core.js` into 20 chat messages.
 2. Temporarily release Wi-Fi for LDN, find a lobby, join it and send the messages.
 3. Close LDN and restore networking, including on failure or interruption.
-4. Offer Gezine's persistent installer after networking is restored, using the console's displayed IP.
+4. Wait for the Remote JS Loader on port 9026 after networking is restored, then offer Gezine's persistent installer.
 
 ## Project structure
 
@@ -62,14 +70,6 @@ send_payload.js     # Optional JS payload sender
 payloads/           # Gezine's exploit and an example payload
 installer/          # Persistent installer and save template
 ldn/                # LDN relative stuff
-```
-
-## Send a JS payload
-
-Once the Remote JS Loader is running, send a JS file to the console IP shown on screen:
-
-```sh
-node send_payload.js <console-ip> payloads/helloworld.js
 ```
 
 ## Credits

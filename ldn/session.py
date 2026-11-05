@@ -51,7 +51,7 @@ async def run(args):
         async with ldn.connect(param) as network_obj:
             # The deadline covers association, not the chat session.
             timeout.deadline = math.inf
-            print(f"[LDN connected] IP={network_obj.participant().ip_address}", flush=True)
+            print(f"[LDN connected] PC LDN IP={network_obj.participant().ip_address}", flush=True)
             return await lobby.run(args, network_obj)
 
 
