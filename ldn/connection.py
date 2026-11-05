@@ -1,10 +1,11 @@
 """LDN network discovery and joining using kinnay/LDN.
 
-Handles key loading, scanning for Civ VII wireless networks, building
+Handles key loading, scanning for LDN networks, building
 connection parameters, and fallback addressing when a host announcement is missing.
 """
 
 import importlib
+import logging
 import os
 from pathlib import Path
 import platform
@@ -13,25 +14,27 @@ import sys
 
 CHANNELS = (1, 6, 11, 36, 40, 44, 48)
 PROTOCOLS = (1, 3)
-SCAN_ROUNDS = 3
+MAX_SCAN_ATTEMPTS = 3
 SCAN_DWELL = 0.3
 PLAYER_NAME = "Civ7-PC"
 KEY_NAMES = ("aes_kek_generation_source", "aes_key_generation_source")
 MASTER_KEYS = {1: "master_key_00", 3: "master_key_12"}
 CIV7_PASSPHRASE_HEX = "cb964487b449f4208b1eabee6e927f8947fad3d88c37"
+logger = logging.getLogger(__name__)
 
 
-async def scan(keys, phy, ifname):
+async def scan(keys, phy, ifname, host=None):
     """Scan for LDN networks. Returns {mac: network_info}."""
     ldn = importlib.import_module("ldn")
     found = {}
 
-    # A host may advertise between channel visits, so repeat the scan.
-    for i in range(SCAN_ROUNDS):
-        print(
-            f"Scan {i + 1}/{SCAN_ROUNDS}: channels {list(CHANNELS)}, protocols {list(PROTOCOLS)}",
-            flush=True,
-        )
+    print("Searching for nearby LDN networks...", flush=True)
+    # One full channel pass usually suffices. Retry only if no matching host
+    # advertised during that pass; keep all results for host selection.
+    for i in range(MAX_SCAN_ATTEMPTS):
+        if i:
+            print(f"LDN network not found yet; retrying scan ({i + 1}/{MAX_SCAN_ATTEMPTS})...", flush=True)
+        logger.debug("Scanning channels %s, protocols %s", CHANNELS, PROTOCOLS)
         networks = await ldn.scan(
             keys,
             ifname=ifname,
@@ -42,11 +45,12 @@ async def scan(keys, phy, ifname):
         )
         for info in networks:
             found[str(info.address).lower()] = info
+        if (host is None and found) or host in found:
+            break
 
     for info in found.values():
         _show_network(info)
 
-    print(f"\n{len(found)} LDN network(s) found.", flush=True)
     return found
 
 
@@ -125,9 +129,8 @@ def install_ip_fallback():
             platform=self._param.platform,
         )
         network.participants[free[0]] = me
-        print(
-            f"[LDN] No host announcement; deduced IP: {me.ip_address} (slot {free[0]})",
-            flush=True,
+        logger.debug(
+            "No host announcement; deduced IP: %s (slot %s)", me.ip_address, free[0],
         )
         await self._interface.add_address(me.ip_address, f"169.254.{self._network_id}.255")
         await self._interface.add_neighbor(host.ip_address, host.mac_address)
@@ -169,19 +172,19 @@ def hardware_check(phy=None, ifname="civ7-ldn"):
 
 
 def _show_network(info):
-    print(
+    logger.debug(
         f"\nHost {info.address} | local_id=0x{info.local_communication_id:016x} "
         f"| scene={info.scene_id}"
     )
-    print(
+    logger.debug(
         f"  channel={info.channel} | protocol={info.protocol} "
         f"| ldn_version={info.version} | app_version={info.app_version}"
     )
-    print(
+    logger.debug(
         f"  participants={info.num_participants}/{info.max_participants} "
         f"| accept={info.accept_policy} | security={info.security_mode}"
     )
     for p in info.participants:
         if p.connected:
             name = p.name.decode("utf-8", "replace")
-            print(f"  participant={name!r} | IP={p.ip_address} | MAC={p.mac_address}")
+            logger.debug("Participant %r | IP=%s | MAC=%s", name, p.ip_address, p.mac_address)

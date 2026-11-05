@@ -1,8 +1,10 @@
 # LDN client
 
-This directory handles the local wireless part of CivSwitchLDN. `run.js` calls `main.py` to scan for a Civilization VII lobby, join it and send the compressed exploit through game chat.
+This directory handles the local wireless part of CivSwitchLDN. `run.js` calls `main.py` to scan nearby LDN networks, connect to the selected host, join its Civilization VII lobby and send the compressed exploit through game chat.
 
-The client always scans, joins a lobby and reads chat messages from stdin. Node selects the radio and manages network restoration. Scan timing and lobby settings are constants in the Python modules.
+The client scans LDN networks, connects to the selected host, joins the game lobby and reads chat messages from stdin. A single scan covers all configured channels; it retries up to two more times only if no network is found (or the requested `--host` is missing). Node selects the radio and manages network restoration. Scan timing and lobby settings are constants in the Python modules. Output shows functional steps by default; `npm start -- --verbose` also enables packet traces and diagnostics.
+
+The scan does not filter networks by game identifier. If several LDN networks are found, use `--host <mac>` to select the Civilization VII host.
 
 The code is split by responsibility:
 

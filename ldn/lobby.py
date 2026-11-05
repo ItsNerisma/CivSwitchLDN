@@ -1,6 +1,7 @@
 """Civ VII lobby handshake and chat delivery, running on Trio."""
 
 from collections import deque
+import logging
 from pathlib import Path
 import socket
 import struct
@@ -13,8 +14,9 @@ import protocol
 import transport
 from connection import PLAYER_NAME
 
-CHAT_DELAY = 0.5
+CHAT_DELAY = 0.2
 MIN_DURATION = 30
+logger = logging.getLogger(__name__)
 
 
 async def run(args, network):
@@ -49,8 +51,16 @@ class LobbySession:
         self.last_sent = None
         self.joined = False
         self.received = 0
+        self.chat_sent = 0
+        self.progress_open = False
 
     async def run(self, sock):
+        try:
+            return await self.deliver(sock)
+        finally:
+            self.finish_progress()
+
+    async def deliver(self, sock):
         # Allow every chat line plus the handshake and final linger to complete.
         duration = max(MIN_DURATION, 15 + CHAT_DELAY * len(self.chat_lines))
         start = next_attempt = time.monotonic()
@@ -74,16 +84,16 @@ class LobbySession:
             linger_done = (
                 self.last_sent is not None
                 and not self.follow
-                and time.monotonic() - self.last_sent >= 5.0
+                and time.monotonic() - self.last_sent >= 2.0
             )
             if linger_done:
-                print("All messages sent; linger timeout reached.", flush=True)
                 break
-
-        print(f"Lobby done: {self.received} message(s) received.", flush=True)
         if not self.joined or self.follow or self.last_sent is None:
-            print("Lobby handshake or chat delivery did not complete.", flush=True)
+            self.finish_progress()
+            message = "Payload delivery did not complete." if self.joined else "Timed out joining the game lobby."
+            print(f"Error: {message}", file=sys.stderr, flush=True)
             return 3
+        print("Payload fully sent over LDN. Closing the wireless connection...", flush=True)
         return 0
 
     async def receive(self, sock):
@@ -97,7 +107,7 @@ class LobbySession:
 
         # The transport handles ordering and retransmissions before game parsing.
         bodies, responses, detail = self.transport.receive(data)
-        print(f"RX {detail}", flush=True)
+        logger.debug("RX %s", detail)
 
         for response in responses:
             await self.send(sock, response, "transport response")
@@ -105,12 +115,13 @@ class LobbySession:
         for body in bodies:
             self.received += 1
             description = protocol.describe(body)
-            print(f"[msg] {description}", flush=True)
+            logger.debug("Message: %s", description)
 
             refused = body.startswith((protocol.REFUSED, protocol.CLOSE))
             rejected = description.startswith(("NetJoinRefused", "NetKicked"))
             if refused or rejected:
-                print("Refused/closed by host.", flush=True)
+                self.finish_progress()
+                print("Error: The host refused the join request or closed the lobby.", file=sys.stderr, flush=True)
                 return False
 
             welcome = body.startswith(protocol.REPLY) or description.startswith("NetWelcome")
@@ -126,13 +137,21 @@ class LobbySession:
             packet = self.transport.queue(build(len(self.transport.sent)))
             await self.send(sock, packet, f"{name} (seq {self.transport.next_seq - 1})")
             self.last_sent = time.monotonic()
+            if name.startswith("NetChat["):
+                self.chat_sent += 1
+                self.show_progress()
+            if not self.follow:
+                print("Payload sent. Keeping LDN open for 2 seconds for final replies and retransmissions...", flush=True)
 
         for packet in self.transport.timers(time.monotonic()):
             await self.send(sock, packet, "keepalive R/V")
 
     def schedule_messages(self, welcome):
         slot = struct.unpack_from("<I", welcome, 40)[0] if len(welcome) >= 44 else 1
-        print(f"[info] assigned slot: {slot}", flush=True)
+        logger.debug("Assigned lobby slot: %s", slot)
+        print("Lobby joined.", flush=True)
+        if self.chat_lines:
+            self.show_progress()
         now = time.monotonic()
 
         # Register with the game before injecting any chat messages.
@@ -150,9 +169,25 @@ class LobbySession:
             ))
         self.joined = True
 
+    def show_progress(self):
+        total = len(self.chat_lines)
+        percent = self.chat_sent * 100 // total
+        inline = sys.stdout.isatty() and not logger.isEnabledFor(logging.DEBUG)
+        self.progress_open = inline and self.chat_sent < total
+        print(
+            f"{'\r' if inline else ''}Sending payload: {percent}% ({self.chat_sent}/{total} messages)",
+            end="" if self.progress_open else "\n",
+            flush=True,
+        )
+
+    def finish_progress(self):
+        if self.progress_open:
+            print(flush=True)
+            self.progress_open = False
+
     async def send(self, sock, data, reason):
         await sock.sendto(data, (self.host_ip, protocol.PORT))
-        print(f"TX {reason} ({len(data)}B)", flush=True)
+        logger.debug("TX %s (%sB)", reason, len(data))
 
 
 def read_chat_lines():
@@ -173,7 +208,7 @@ async def warmup_arp(device, local_ip, host_ip):
                 raw.send(frame)
                 await trio.sleep(0.1)
 
-        print("[ARP] warmup sent", flush=True)
+        logger.debug("ARP warmup sent")
     except (OSError, ValueError) as e:
-        print(f"[ARP] warmup failed: {e}", flush=True)
+        logger.warning("Could not prepare LDN address resolution: %s", e)
     await trio.sleep(0.3)

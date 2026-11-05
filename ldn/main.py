@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scan for a Civ VII lobby, join it and deliver chat messages over LDN."""
+"""Scan LDN networks, connect to a host and send messages in a Civ VII lobby."""
 
 import importlib
 import logging
@@ -32,7 +32,10 @@ def main(argv=None):
         return 1
 
     connection.install_ip_fallback()
-    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
 
     import session
     trio = importlib.import_module("trio")

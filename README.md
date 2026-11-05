@@ -28,13 +28,15 @@ On the Switch, open Civilization VII and go to **MULTIPLAYER > WIRELESS > CREATE
 ### 3. Run the thing
 
 > [!IMPORTANT]
-> Network will be **temporarily disabled** while the payload is being sent. It's a requirement for the LDN stuff. Once the exploit is triggered (or an error occurs), it will be re-enabled automatically.
+> NetworkManager will **temporarily disable all managed network connections** while the payload is sent over LDN. Afterwards, the script restores the previous Wi-Fi connection and waits for its IPv4 address before looking for the Remote JS Loader. If restoration fails, reconnect Wi-Fi manually before using the loader.
 
 Leave the lobby open, then run:
 
 ```sh
 npm start
 ```
+
+The output shows connection and delivery steps, with warnings and errors when needed. For packet traces and diagnostics, run `npm start -- --verbose`.
 
 ### 4. Persist the exploit (optional)
 
@@ -57,8 +59,8 @@ The JS file is optional (default: `payloads/helloworld.js`), as is a third port 
 `run.js` handles the sequence:
 
 1. Compress `payloads/core.js` into 19 chat messages.
-2. Temporarily release Wi-Fi for LDN, find a lobby, join it and send the messages.
-3. Close LDN and restore networking, including on failure or interruption.
+2. Temporarily release Wi-Fi for LDN, scan nearby LDN networks, connect to the selected host, join its Civilization VII lobby and send the messages.
+3. Close the LDN connection and attempt to restore networking, including on failure or interruption.
 4. Wait for the Remote JS Loader on port 9026 after networking is restored, then offer Gezine's persistent installer.
 
 ## Project structure

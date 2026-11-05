@@ -18,14 +18,16 @@ async def run(args):
         keys,
         phy=args.phy,
         ifname=args.ifname,
+        host=args.host,
     )
 
     # Auto-selection is safe only when exactly one network was found.
     if args.host is None:
+        if not found:
+            raise RuntimeError("No LDN network found. Open the game's wireless lobby and try again.")
         if len(found) != 1:
-            raise RuntimeError(f"{len(found)} networks found; specify --host MAC.")
+            raise RuntimeError(f"Multiple LDN networks found: {', '.join(found)}. Select one with --host MAC.")
         args.host = next(iter(found))
-        print(f"Auto-selected host: {args.host}", flush=True)
 
     if args.host not in found:
         raise RuntimeError("Host not found. Check MAC, channels, keys.")
@@ -38,13 +40,16 @@ async def run(args):
         ifname=args.ifname,
     )
 
-    print(f"\nConnecting to {args.host}", flush=True)
+    print(f"Connecting via LDN to {args.host} (channel {info.channel})...", flush=True)
 
-    with trio.fail_after(CONNECT_TIMEOUT) as timeout:
-        async with ldn.connect(param) as network_obj:
-            # The deadline covers association, not the chat session.
-            timeout.deadline = math.inf
-            print(f"[LDN connected] PC LDN IP={network_obj.participant().ip_address}", flush=True)
-            return await lobby.run(args, network_obj)
+    try:
+        with trio.fail_after(CONNECT_TIMEOUT) as timeout:
+            async with ldn.connect(param) as network_obj:
+                # The deadline covers association, not the chat session.
+                timeout.deadline = math.inf
+                print("LDN connected. Joining the Civilization VII lobby...", flush=True)
+                return await lobby.run(args, network_obj)
+    except trio.TooSlowError as e:
+        raise RuntimeError("LDN connection timed out. Check that the wireless lobby is still open.") from e
 
 

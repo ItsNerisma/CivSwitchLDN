@@ -42,6 +42,25 @@ with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
 ' "$1" "$2"
 }
 
+restore_connection() {
+    local device="$1" conn="$2" state current address deadline=$((SECONDS + 60))
+    while (( SECONDS < deadline )); do
+        state="$(nmcli -g GENERAL.STATE device show "$device" 2>/dev/null || true)"
+        state="${state%% *}"
+        current="$(nmcli -g GENERAL.CON-UUID device show "$device" 2>/dev/null || true)"
+        address="$(nmcli -g IP4.ADDRESS device show "$device" 2>/dev/null || true)"
+        if [[ "$state" == 100 && "$current" == "$conn" && -n "$address" ]]; then
+            return 0
+        fi
+        if [[ "$state" == 30 || ( "$state" == 100 && "$current" != "$conn" ) ]]; then
+            nmcli --wait 10 connection up uuid "$conn" ifname "$device" || true
+        fi
+        sleep 1
+    done
+    echo "[net] $device did not reconnect to $conn with an IPv4 address." >&2
+    return 1
+}
+
 restore() {
     local status=$? failed=0 i conn
     trap - EXIT INT TERM
@@ -54,13 +73,16 @@ restore() {
         fi
     done
     if [[ "$networking" == enabled ]]; then
-        nmcli networking on || failed=1
-        for i in "${!interfaces[@]}"; do
-            conn="${connections[i]}"
-            if [[ -n "$conn" && "$conn" != -- ]]; then
-                nmcli --wait 30 connection up uuid "$conn" || failed=1
-            fi
-        done
+        if nmcli networking on; then
+            for i in "${!interfaces[@]}"; do
+                conn="${connections[i]}"
+                if [[ -n "$conn" && "$conn" != -- ]]; then
+                    restore_connection "${interfaces[i]}" "$conn" || failed=1
+                fi
+            done
+        else
+            failed=1
+        fi
     fi
     if (( failed )); then
         echo "[net] Networking could not be fully restored. Reconnect before running the installer." >&2

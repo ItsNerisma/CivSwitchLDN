@@ -6,8 +6,9 @@
  *   --keys <file>       Your prod.keys file (default: ./prod.keys)
  *   --phy <radio>       Wi-Fi radio (auto-detected if there is only one)
  *   --ifname <name>     Temporary LDN interface (default: civ7-ldn)
- *   --host <mac>        LDN host MAC when more than one lobby is found
+ *   --host <mac>        LDN host MAC when more than one network is found
  *   --switch-ip <ip>    Console's Wi-Fi IP; skips LAN discovery
+ *   --verbose           Show LDN packet and diagnostic logs
  *   --help              Show a short usage summary
  */
 const { spawn } = require("child_process");
@@ -39,6 +40,8 @@ function parseArgs(args) {
       opts[values[arg]] = args[++i];
     } else if (arg === "--help" || arg === "-h") {
       opts.help = true;
+    } else if (arg === "--verbose") {
+      opts.verbose = true;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -156,14 +159,16 @@ async function injectViaLDN(opts) {
   }
   const phy = selectPhy(opts.phy);
   opts.phy = phy;
+  console.log("Preparing the payload...");
   const lines = await compress(fs.readFileSync(PAYLOAD_PATH, "utf8"));
-  console.log(`${lines.length} chat lines ready.`);
+  console.log(`Payload ready (${lines.length} chat messages).`);
   const args = [
     path.join(__dirname, "bash", "network.sh"), "--phy", phy,
     PYTHON, path.join(__dirname, "ldn", "main.py"),
     "--keys", path.resolve(opts.keys), "--phy", phy, "--ifname", opts.ifname,
   ];
   if (opts.host) args.push("--host", opts.host);
+  if (opts.verbose) args.push("--verbose");
   await runCommand("bash", args, lines.join("\n") + "\n");
 }
 
@@ -207,7 +212,7 @@ async function waitForLoader(opts, prompt) {
 async function main(args = process.argv.slice(2)) {
   const opts = parseArgs(args);
   if (opts.help) {
-    console.log("Usage: npm start -- [--keys path] [--phy radio] [--ifname name] [--host lobby-mac] [--switch-ip console-ip]");
+    console.log("Usage: npm start -- [--keys path] [--phy radio] [--ifname name] [--host ldn-host-mac] [--switch-ip console-ip] [--verbose]");
     return;
   }
 
@@ -219,6 +224,7 @@ async function main(args = process.argv.slice(2)) {
 
     const answer = await prompt.question("Run the persistent installer? [y/N] ");
     if (answer.trim().toLowerCase() === "y") {
+      console.log("Installing the persistent loader...");
       await runCommand(INSTALLER_PYTHON, [
         path.join(__dirname, "installer", "install.py"), opts.switchIP, String(PORT), PAYLOAD_PATH,
       ]);
@@ -231,7 +237,7 @@ async function main(args = process.argv.slice(2)) {
 
 if (require.main === module) {
   main().catch((err) => {
-    console.error(err.message || err);
+    console.error(`Error: ${err.message || err}`);
     process.exitCode = 1;
   });
 }
