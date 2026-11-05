@@ -14,16 +14,15 @@
 const { spawn } = require("child_process");
 const fs = require("fs");
 const net = require("net");
-const os = require("os");
 const path = require("path");
 const readline = require("readline/promises");
 const { setTimeout: sleep } = require("timers/promises");
 const compress = require("./compress");
+const { PORT, probeLoader, discoverLoader } = require("./discovery");
 
 const PAYLOAD_PATH = path.join(__dirname, "payloads", "core.js");
 const PYTHON = path.join(__dirname, "ldn", ".venv", "bin", "python-ldn");
 const INSTALLER_PYTHON = path.join(__dirname, "ldn", ".venv", "bin", "python");
-const PORT = 9026;
 
 function parseArgs(args) {
   const opts = { keys: path.join(__dirname, "prod.keys"), ifname: "civ7-ldn" };
@@ -59,69 +58,6 @@ function selectPhy(phy) {
     throw new Error(`Available Wi-Fi radios: ${radios.join(", ") || "none"}. Select one with --phy.`);
   }
   return radios[0];
-}
-
-function addressNumber(ip) {
-  return ip.split(".").reduce((value, part) => (value << 8) | Number(part), 0) >>> 0;
-}
-
-function localCandidates(phy) {
-  const interfaces = os.networkInterfaces();
-  const targets = new Set();
-
-  for (const [name, addresses] of Object.entries(interfaces)) {
-    let radio;
-    try {
-      radio = path.basename(fs.realpathSync(`/sys/class/net/${name}/phy80211`));
-    } catch {
-      continue;
-    }
-    if (radio !== phy) continue;
-
-    for (const address of addresses) {
-      if (address.family !== "IPv4" || address.internal || !address.netmask) continue;
-
-      const mask = addressNumber(address.netmask);
-      const count = (~mask >>> 0) + 1;
-      if (count < 4 || count > 512) continue;
-
-      const network = addressNumber(address.address) & mask;
-      for (let offset = 1; offset < count - 1; offset++) {
-        const value = (network + offset) >>> 0;
-        const ip = [24, 16, 8, 0].map((shift) => (value >>> shift) & 255).join(".");
-        if (ip !== address.address) targets.add(ip);
-      }
-    }
-  }
-  return [...targets];
-}
-
-function probeLoader(ip) {
-  return new Promise((resolve) => {
-    let response = "";
-    const sock = net.createConnection({ host: ip, port: PORT }, () => sock.end("1"));
-    sock.setTimeout(1500, () => sock.destroy());
-    sock.on("data", (chunk) => {
-      response += chunk;
-      if (response.length > 4096) sock.destroy();
-    });
-    sock.once("error", () => resolve(false));
-    sock.once("close", () => resolve(response.includes("Executed successfully")));
-  });
-}
-
-async function discoverLoader(phy, deadline = Infinity) {
-  const candidates = localCandidates(phy);
-  const matches = [];
-  let next = 0;
-  const workers = Array.from({ length: Math.min(32, candidates.length) }, async () => {
-    while (next < candidates.length && Date.now() < deadline) {
-      const ip = candidates[next++];
-      if (await probeLoader(ip)) matches.push(ip);
-    }
-  });
-  await Promise.all(workers);
-  return next < candidates.length ? [] : matches;
 }
 
 function runCommand(command, args, input) {
@@ -187,7 +123,7 @@ async function waitForLoader(opts, prompt) {
 
   while (Date.now() < deadline) {
     if (opts.switchIP) {
-      if (await probeLoader(opts.switchIP)) return opts.switchIP;
+      if (await probeLoader(opts.switchIP, Math.min(1500, deadline - Date.now()))) return opts.switchIP;
     } else {
       const matches = await discoverLoader(opts.phy, deadline);
       if (matches.length === 1) return matches[0];
@@ -198,7 +134,7 @@ async function waitForLoader(opts, prompt) {
     }
 
     const remaining = deadline - Date.now();
-    if (remaining > 0) await sleep(Math.min(2000, remaining));
+    if (remaining > 0) await sleep(Math.min(500, remaining));
   }
 
   if (!opts.switchIP) {

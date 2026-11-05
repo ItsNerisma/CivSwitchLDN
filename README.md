@@ -67,6 +67,7 @@ The JS file is optional (default: `payloads/helloworld.js`), as is a third port 
 
 ```text
 run.js                   # Main flow and installer prompt
+loader.js                # Remote JS Loader verification and LAN discovery
 compress.js              # Payload compression for chat delivery
 send_payload.js          # Optional JS payload sender
 bash/                    # Linux scripts (setup, network stuff...)
