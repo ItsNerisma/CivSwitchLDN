@@ -11,6 +11,11 @@
 - A Switch 2, **on the same Wi-Fi network as the Linux system**.
 - **Your own `prod.keys`, dumped from your own Switch.** Place it at the repository root before running.
 
+## Why ?
+
+- No need for Pico, Android, ESP or anything, just Linux and a Switch !
+- Whole payload sent in 4s instead of 15min+ :D
+
 ## Usage
 
 ### 1. Install dependencies once.
