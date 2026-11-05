@@ -28,7 +28,7 @@ On the Switch, open Civilization VII and go to **MULTIPLAYER > WIRELESS > CREATE
 ### 3. Run the thing
 
 > [!IMPORTANT]
-> Wi-Fi will be **temporarily disabled** while the payload is being sent. It's a requirement for the LDN stuff. Once the exploit is triggered (or an error occurs), it will be re-enabled automatically.
+> Network will be **temporarily disabled** while the payload is being sent. It's a requirement for the LDN stuff. Once the exploit is triggered (or an error occurs), it will be re-enabled automatically.
 
 Leave the lobby open, then run:
 
@@ -56,7 +56,7 @@ The JS file is optional (default: `payloads/helloworld.js`), as is a third port 
 
 `run.js` handles the sequence:
 
-1. Compress `payloads/core.js` into 20 chat messages.
+1. Compress `payloads/core.js` into 19 chat messages.
 2. Temporarily release Wi-Fi for LDN, find a lobby, join it and send the messages.
 3. Close LDN and restore networking, including on failure or interruption.
 4. Wait for the Remote JS Loader on port 9026 after networking is restored, then offer Gezine's persistent installer.
@@ -64,17 +64,15 @@ The JS file is optional (default: `payloads/helloworld.js`), as is a third port 
 ## Project structure
 
 ```text
-run.js              # Main flow and installer prompt
-compress.js         # Payload compression for chat delivery
-send_payload.js     # Optional JS payload sender
-bash/
-  network.sh        # Temporary network suspension and restoration
-  setup.sh          # Dependency and permission setup
-payloads/           # Gezine's exploit and an example payload
-installer/          # Persistent installer and save template
-ldn/                # LDN client, game protocol and transport
-LICENSES/           # Original licenses for the upstream components
-THIRD_PARTY_NOTICES.md # Reused files, sources and license scope
+run.js                   # Main flow and installer prompt
+compress.js              # Payload compression for chat delivery
+send_payload.js          # Optional JS payload sender
+bash/                    # Linux scripts (setup, network stuff...)
+payloads/                # Gezine's exploit and an example payload
+installer/               # Persistent installer and save template
+ldn/                     # LDN client, game protocol and transport
+LICENSES/                # Original licenses for the upstream components
+THIRD_PARTY_NOTICES.md   # Reused files, sources and license scope
 ```
 
 ## Licenses
