@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""Scan for a Civ VII lobby, join it and deliver chat messages over LDN."""
+
+import importlib
+import logging
+import signal
+import sys
+
+import connection
+from cli import build_parser
+
+
+def main(argv=None):
+    cli = build_parser()
+    args = cli.parse_args(argv)
+
+    try:
+        args.phy = connection.select_phy(args.phy)
+    except RuntimeError as e:
+        cli.error(str(e))
+
+    if args.command == "doctor":
+        return connection.doctor(args.phy, args.ifname, args.keys)
+
+    errors = connection.hardware_check(args.phy, args.ifname)
+    if errors:
+        for e in errors:
+            print(f"[!] {e}", file=sys.stderr)
+        return 1
+
+    # Report missing packages before attempting the LDN scan.
+    try:
+        importlib.import_module("ldn")
+        importlib.import_module("trio")
+    except ImportError as e:
+        print(
+            f"Missing dependency: {e.name}. Run: pip install -r ldn/requirements.txt",
+            file=sys.stderr,
+        )
+        return 1
+
+    connection.install_ip_fallback()
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+
+    import session
+    trio = importlib.import_module("trio")
+    signal.signal(signal.SIGINT, interrupt)
+    signal.signal(signal.SIGTERM, interrupt)
+
+    try:
+        return trio.run(session.run, args)
+    except KeyboardInterrupt:
+        print("\nInterrupted.")
+        return 130
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+def interrupt(signum, frame):
+    raise KeyboardInterrupt
+
+
+if __name__ == "__main__":
+    sys.exit(main())
