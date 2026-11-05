@@ -8,8 +8,45 @@ const PORT = 9026;
 const PROBE_TIMEOUT = 1500;
 const SCAN_CONCURRENCY = 128;
 
-function addressNumber(ip) {
-  return ip.split(".").reduce((value, part) => (value << 8) | Number(part), 0) >>> 0;
+async function discoverLoader(phy, deadline = Infinity) {
+  const candidates = localCandidates(phy);
+  const matches = [];
+  let next = 0;
+  const workers = Array.from({ length: Math.min(SCAN_CONCURRENCY, candidates.length) }, async () => {
+    while (next < candidates.length && Date.now() < deadline) {
+      const ip = candidates[next++];
+      if (await probeLoader(ip, Math.min(PROBE_TIMEOUT, deadline - Date.now()))) matches.push(ip);
+    }
+  });
+  await Promise.all(workers);
+  // Finish the subnet before selecting a console: another loader may be present.
+  return next < candidates.length ? [] : matches;
+}
+
+function probeLoader(ip, timeout = PROBE_TIMEOUT) {
+  if (timeout <= 0) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    let response = "";
+    let settled = false;
+    const sock = net.createConnection({ host: ip, port: PORT });
+    const finish = (found) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      sock.destroy();
+      resolve(found);
+    };
+    // Bound the entire probe, including peers that keep sending unrelated data.
+    const timer = setTimeout(() => finish(false), timeout);
+    sock.once("connect", () => sock.end("1"));
+    sock.on("data", (chunk) => {
+      response += chunk;
+      if (response.includes("Executed successfully")) finish(true);
+      else if (response.length > 4096) finish(false);
+    });
+    sock.once("error", () => finish(false));
+    sock.once("close", () => finish(false));
+  });
 }
 
 function localCandidates(phy) {
@@ -40,45 +77,8 @@ function localCandidates(phy) {
   return [...targets];
 }
 
-function probeLoader(ip, timeout = PROBE_TIMEOUT) {
-  if (timeout <= 0) return Promise.resolve(false);
-  return new Promise((resolve) => {
-    let response = "";
-    let settled = false;
-    const sock = net.createConnection({ host: ip, port: PORT });
-    const finish = (found) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      sock.destroy();
-      resolve(found);
-    };
-    // Bound the entire probe, including peers that keep sending unrelated data.
-    const timer = setTimeout(() => finish(false), timeout);
-    sock.once("connect", () => sock.end("1"));
-    sock.on("data", (chunk) => {
-      response += chunk;
-      if (response.includes("Executed successfully")) finish(true);
-      else if (response.length > 4096) finish(false);
-    });
-    sock.once("error", () => finish(false));
-    sock.once("close", () => finish(false));
-  });
-}
-
-async function discoverLoader(phy, deadline = Infinity) {
-  const candidates = localCandidates(phy);
-  const matches = [];
-  let next = 0;
-  const workers = Array.from({ length: Math.min(SCAN_CONCURRENCY, candidates.length) }, async () => {
-    while (next < candidates.length && Date.now() < deadline) {
-      const ip = candidates[next++];
-      if (await probeLoader(ip, Math.min(PROBE_TIMEOUT, deadline - Date.now()))) matches.push(ip);
-    }
-  });
-  await Promise.all(workers);
-  // Finish the subnet before selecting a console: another loader may be present.
-  return next < candidates.length ? [] : matches;
+function addressNumber(ip) {
+  return ip.split(".").reduce((value, part) => (value << 8) | Number(part), 0) >>> 0;
 }
 
 module.exports = { PORT, probeLoader, discoverLoader };

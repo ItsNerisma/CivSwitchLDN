@@ -18,11 +18,93 @@ const path = require("path");
 const readline = require("readline/promises");
 const { setTimeout: sleep } = require("timers/promises");
 const compress = require("./compress");
-const { PORT, probeLoader, discoverLoader } = require("./discovery");
+const { PORT, probeLoader, discoverLoader } = require("./loader");
 
 const PAYLOAD_PATH = path.join(__dirname, "payloads", "core.js");
 const PYTHON = path.join(__dirname, "ldn", ".venv", "bin", "python-ldn");
 const INSTALLER_PYTHON = path.join(__dirname, "ldn", ".venv", "bin", "python");
+
+async function main(args = process.argv.slice(2)) {
+  const opts = parseArgs(args);
+  if (opts.help) {
+    console.log("Usage: npm start -- [--keys path] [--phy radio] [--ifname name] [--host ldn-host-mac] [--switch-ip console-ip] [--verbose]");
+    return;
+  }
+
+  const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    await injectViaLDN(opts);
+    opts.switchIP = await waitForLoader(opts, prompt);
+    console.log(`Remote JS Loader ready at ${opts.switchIP}:${PORT}`);
+
+    const answer = await prompt.question("Run the persistent installer? [y/N] ");
+    if (answer.trim().toLowerCase() === "y") {
+      console.log("Installing the persistent loader...");
+      await runCommand(INSTALLER_PYTHON, [
+        path.join(__dirname, "installer", "install.py"), opts.switchIP, String(PORT), PAYLOAD_PATH,
+      ]);
+    }
+  } finally {
+    prompt.close();
+  }
+  console.log("Done.");
+}
+
+async function injectViaLDN(opts) {
+  if (!fs.existsSync(opts.keys)) {
+    throw new Error(`Place your own prod.keys, dumped from your Switch, at ${opts.keys}.`);
+  }
+  const phy = selectPhy(opts.phy);
+  opts.phy = phy;
+  console.log("Preparing the payload...");
+  const lines = await compress(fs.readFileSync(PAYLOAD_PATH, "utf8"));
+  console.log(`Payload ready (${lines.length} chat messages).`);
+  const args = [
+    path.join(__dirname, "bash", "network.sh"), "--phy", phy,
+    PYTHON, path.join(__dirname, "ldn", "main.py"),
+    "--keys", path.resolve(opts.keys), "--phy", phy, "--ifname", opts.ifname,
+  ];
+  if (opts.host) args.push("--host", opts.host);
+  if (opts.verbose) args.push("--verbose");
+  await runCommand("bash", args, lines.join("\n") + "\n");
+}
+
+async function waitForLoader(opts, prompt) {
+  const deadline = Date.now() + 60000;
+  console.log(`Waiting for the Remote JS Loader on port ${PORT}...`);
+
+  while (Date.now() < deadline) {
+    if (opts.switchIP) {
+      if (await probeLoader(opts.switchIP, Math.min(1500, deadline - Date.now()))) return opts.switchIP;
+    } else {
+      const matches = await discoverLoader(opts.phy, deadline);
+      if (matches.length === 1) return matches[0];
+      if (matches.length > 1) {
+        console.log(`Multiple loaders found: ${matches.join(", ")}.`);
+        opts.switchIP = await askSwitchIP(prompt);
+      }
+    }
+
+    const remaining = deadline - Date.now();
+    if (remaining > 0) await sleep(Math.min(500, remaining));
+  }
+
+  if (!opts.switchIP) {
+    console.log("Automatic discovery timed out. Enter the console IP shown by the loader.");
+    opts.switchIP = await askSwitchIP(prompt);
+    return waitForLoader(opts, prompt);
+  }
+  throw new Error(`Remote JS Loader not found on port ${PORT}. Check the console and Wi-Fi connection.`);
+}
+
+async function askSwitchIP(prompt) {
+  console.log("Wait for 'Awaiting payload' on the console. Use its Wi-Fi IP, after LDN has closed.");
+  while (true) {
+    const ip = (await prompt.question("Console IP: ")).trim();
+    if (net.isIPv4(ip)) return ip;
+    console.log("Enter a valid IPv4 address.");
+  }
+}
 
 function parseArgs(args) {
   const opts = { keys: path.join(__dirname, "prod.keys"), ifname: "civ7-ldn" };
@@ -87,88 +169,6 @@ function runCommand(command, args, input) {
       child.stdin.end(input);
     }
   });
-}
-
-async function injectViaLDN(opts) {
-  if (!fs.existsSync(opts.keys)) {
-    throw new Error(`Place your own prod.keys, dumped from your Switch, at ${opts.keys}.`);
-  }
-  const phy = selectPhy(opts.phy);
-  opts.phy = phy;
-  console.log("Preparing the payload...");
-  const lines = await compress(fs.readFileSync(PAYLOAD_PATH, "utf8"));
-  console.log(`Payload ready (${lines.length} chat messages).`);
-  const args = [
-    path.join(__dirname, "bash", "network.sh"), "--phy", phy,
-    PYTHON, path.join(__dirname, "ldn", "main.py"),
-    "--keys", path.resolve(opts.keys), "--phy", phy, "--ifname", opts.ifname,
-  ];
-  if (opts.host) args.push("--host", opts.host);
-  if (opts.verbose) args.push("--verbose");
-  await runCommand("bash", args, lines.join("\n") + "\n");
-}
-
-async function askSwitchIP(prompt) {
-  console.log("Wait for 'Awaiting payload' on the console. Use its Wi-Fi IP, after LDN has closed.");
-  while (true) {
-    const ip = (await prompt.question("Console IP: ")).trim();
-    if (net.isIPv4(ip)) return ip;
-    console.log("Enter a valid IPv4 address.");
-  }
-}
-
-async function waitForLoader(opts, prompt) {
-  const deadline = Date.now() + 60000;
-  console.log(`Waiting for the Remote JS Loader on port ${PORT}...`);
-
-  while (Date.now() < deadline) {
-    if (opts.switchIP) {
-      if (await probeLoader(opts.switchIP, Math.min(1500, deadline - Date.now()))) return opts.switchIP;
-    } else {
-      const matches = await discoverLoader(opts.phy, deadline);
-      if (matches.length === 1) return matches[0];
-      if (matches.length > 1) {
-        console.log(`Multiple loaders found: ${matches.join(", ")}.`);
-        opts.switchIP = await askSwitchIP(prompt);
-      }
-    }
-
-    const remaining = deadline - Date.now();
-    if (remaining > 0) await sleep(Math.min(500, remaining));
-  }
-
-  if (!opts.switchIP) {
-    console.log("Automatic discovery timed out. Enter the console IP shown by the loader.");
-    opts.switchIP = await askSwitchIP(prompt);
-    return waitForLoader(opts, prompt);
-  }
-  throw new Error(`Remote JS Loader not found on port ${PORT}. Check the console and Wi-Fi connection.`);
-}
-
-async function main(args = process.argv.slice(2)) {
-  const opts = parseArgs(args);
-  if (opts.help) {
-    console.log("Usage: npm start -- [--keys path] [--phy radio] [--ifname name] [--host ldn-host-mac] [--switch-ip console-ip] [--verbose]");
-    return;
-  }
-
-  const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    await injectViaLDN(opts);
-    opts.switchIP = await waitForLoader(opts, prompt);
-    console.log(`Remote JS Loader ready at ${opts.switchIP}:${PORT}`);
-
-    const answer = await prompt.question("Run the persistent installer? [y/N] ");
-    if (answer.trim().toLowerCase() === "y") {
-      console.log("Installing the persistent loader...");
-      await runCommand(INSTALLER_PYTHON, [
-        path.join(__dirname, "installer", "install.py"), opts.switchIP, String(PORT), PAYLOAD_PATH,
-      ]);
-    }
-  } finally {
-    prompt.close();
-  }
-  console.log("Done.");
 }
 
 if (require.main === module) {
