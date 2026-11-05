@@ -5,7 +5,6 @@ connection parameters, and fallback addressing when a host announcement is missi
 """
 
 import importlib
-import importlib.metadata
 import os
 from pathlib import Path
 import platform
@@ -13,35 +12,36 @@ import re
 import sys
 
 CHANNELS = (1, 6, 11, 36, 40, 44, 48)
+PROTOCOLS = (1, 3)
+SCAN_ROUNDS = 3
+SCAN_DWELL = 0.3
+PLAYER_NAME = "Civ7-PC"
 KEY_NAMES = ("aes_kek_generation_source", "aes_key_generation_source")
 MASTER_KEYS = {1: "master_key_00", 3: "master_key_12"}
 CIV7_PASSPHRASE_HEX = "cb964487b449f4208b1eabee6e927f8947fad3d88c37"
 
 
-async def scan(keys, phy=None, ifname="civ7-ldn", channels=None, protocols=(1, 3),
-               dwell=0.3, rounds=3, local_id=None):
+async def scan(keys, phy, ifname):
     """Scan for LDN networks. Returns {mac: network_info}."""
     ldn = importlib.import_module("ldn")
-    channels = channels or list(CHANNELS)
     found = {}
 
     # A host may advertise between channel visits, so repeat the scan.
-    for i in range(rounds):
+    for i in range(SCAN_ROUNDS):
         print(
-            f"Scan {i + 1}/{rounds}: channels {channels}, protocols {list(protocols)}",
+            f"Scan {i + 1}/{SCAN_ROUNDS}: channels {list(CHANNELS)}, protocols {list(PROTOCOLS)}",
             flush=True,
         )
         networks = await ldn.scan(
             keys,
             ifname=ifname,
             phyname=phy,
-            channels=channels,
-            dwell_time=dwell,
-            protocols=protocols,
+            channels=list(CHANNELS),
+            dwell_time=SCAN_DWELL,
+            protocols=list(PROTOCOLS),
         )
         for info in networks:
-            if local_id is None or info.local_communication_id == local_id:
-                found[str(info.address).lower()] = info
+            found[str(info.address).lower()] = info
 
     for info in found.values():
         _show_network(info)
@@ -50,8 +50,7 @@ async def scan(keys, phy=None, ifname="civ7-ldn", channels=None, protocols=(1, 3
     return found
 
 
-def build_connect_params(info, keys, name="Civ7-PC", passphrase_hex=CIV7_PASSPHRASE_HEX,
-                         app_version=None, phy=None, ifname="civ7-ldn", nx_platform=True):
+def build_connect_params(info, keys, phy, ifname):
     """Build ConnectNetworkParam from a scanned network."""
     ldn = importlib.import_module("ldn")
     if info.accept_policy == ldn.ACCEPT_NONE:
@@ -59,21 +58,21 @@ def build_connect_params(info, keys, name="Civ7-PC", passphrase_hex=CIV7_PASSPHR
     if info.num_participants >= info.max_participants:
         raise RuntimeError("Network is full.")
 
-    # Preserve the version advertised by the host unless explicitly overridden.
+    # Use the host's version and the platform expected by Civilization VII.
     param = ldn.ConnectNetworkParam()
     param.keys = keys
     param.network = info
     param.phyname = phy
     param.ifname = ifname
-    param.name = name.encode("utf-8")
-    param.app_version = info.app_version if app_version is None else app_version
-    param.platform = ldn.PLATFORM_NX if nx_platform else ldn.PLATFORM_OUNCE
-    param.password = bytes.fromhex(passphrase_hex) if passphrase_hex else b""
+    param.name = PLAYER_NAME.encode("utf-8")
+    param.app_version = info.app_version
+    param.platform = ldn.PLATFORM_NX
+    param.password = bytes.fromhex(CIV7_PASSPHRASE_HEX)
     return param
 
 
-def load_keys(path, protocols=(1, 3)):
-    """Load prod.keys and validate required entries for the given protocols."""
+def load_keys(path):
+    """Load prod.keys and validate entries for the supported LDN protocols."""
     ldn = importlib.import_module("ldn")
     path = Path(path).expanduser()
     try:
@@ -84,35 +83,13 @@ def load_keys(path, protocols=(1, 3)):
         raise RuntimeError("Malformed key file.") from e
 
     # LDN needs different key entries for each selected protocol version.
-    required = (*KEY_NAMES, *(MASTER_KEYS[p] for p in protocols))
+    required = (*KEY_NAMES, *(MASTER_KEYS[p] for p in PROTOCOLS))
     missing = [n for n in required if n not in keys]
     if missing:
         raise RuntimeError("Missing keys: " + ", ".join(missing))
     if any(len(keys[n]) != 16 for n in required):
         raise RuntimeError("AES keys must be exactly 16 bytes.")
     return keys
-
-
-def doctor(phy=None, ifname="civ7-ldn", keys_path=None):
-    """Run a read-only diagnostic check. Returns exit code."""
-    print(f"Python: {sys.version.split()[0]} ; platform: {sys.platform}")
-    errors = hardware_check(phy, ifname)
-    for pkg in ("ldn", "trio", "python-netlink", "pycryptodome"):
-        try:
-            print(f"{pkg}: {importlib.metadata.version(pkg)}")
-        except importlib.metadata.PackageNotFoundError:
-            errors.append(f"Missing dependency: {pkg}")
-
-    if keys_path:
-        if Path(keys_path).expanduser().is_file():
-            print("Key file present (not read by doctor).")
-        else:
-            errors.append(f"Key file not found: {keys_path}")
-
-    for e in errors:
-        print(f"[!] {e}")
-    print("Read-only diagnostic; no scan or network change performed.")
-    return 1 if errors else 0
 
 
 def install_ip_fallback():
@@ -156,21 +133,6 @@ def install_ip_fallback():
         await self._interface.add_neighbor(host.ip_address, host.mac_address)
 
     ldn.STANetwork._initialize_network = _initialize
-
-
-def select_phy(phy=None):
-    """Select the only available radio, or require an explicit choice."""
-    if phy is not None:
-        return phy
-
-    root = Path("/sys/class/ieee80211")
-    radios = sorted(p.name for p in root.iterdir()) if root.exists() else []
-    if len(radios) != 1:
-        raise RuntimeError(
-            f"Available Wi-Fi radios: {', '.join(radios) or 'none'}. "
-            "Select one with --phy."
-        )
-    return radios[0]
 
 
 def hardware_check(phy=None, ifname="civ7-ldn"):

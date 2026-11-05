@@ -4,12 +4,11 @@
   "description": "Send the CivSwitch V8 exploit to a Nintendo Switch over LDN local wireless",
   "type": "commonjs",
   "scripts": {
-    "postinstall": "bash setup.sh",
-    "start": "node run.js",
-    "send": "node send_payload.js"
+    "postinstall": "bash bash/setup.sh",
+    "start": "node run.js"
   },
   "dependencies": {
     "terser": "^5.51.2"
   },
-  "license": "MIT"
+  "license": "GPL-3.0-only"
 }

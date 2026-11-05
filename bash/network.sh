@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Temporarily release the selected Wi-Fi radio for an LDN command.
-# Usage: bash network.sh --phy <radio> <command> [args...]
+# Usage: bash bash/network.sh --phy <radio> <command> [args...]
 set -uo pipefail
 
-root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 python_ldn="$root/ldn/.venv/bin/python-ldn"
 
 if [[ $# -lt 3 || "$1" != --phy ]]; then
-    echo "Usage: bash network.sh --phy <radio> <command> [args...]" >&2
+    echo "Usage: bash bash/network.sh --phy <radio> <command> [args...]" >&2
     exit 1
 fi
 phy="$2"

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Send a JS file to the CivSwitch Remote JS Loader (TCP port 9026).
 //
-// Usage: node send_payload.js <switch-ip> [file.js] [port]
-//   e.g. node send_payload.js 169.254.7.1 payloads/helloworld.js
+// Usage: node send_payload.js <console-ip> [file.js] [port]
+//   e.g. node send_payload.js 192.168.1.42 payloads/helloworld.js
 
 const net = require("net");
 const fs = require("fs");
@@ -12,7 +12,7 @@ const file = process.argv[3] || "payloads/helloworld.js";
 const port = parseInt(process.argv[4] || "9026", 10);
 
 if (!ip) {
-  console.error("Usage: node send_payload.js <switch-ip> [file.js] [port]");
+  console.error("Usage: node send_payload.js <console-ip> [file.js] [port]");
   process.exit(1);
 }
 

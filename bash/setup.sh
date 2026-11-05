@@ -2,7 +2,7 @@
 # Post-install: create Python venv, install LDN deps, grant network capabilities.
 set -euo pipefail
 
-root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 venv="$root/ldn/.venv"
 python_ldn="$venv/bin/python-ldn"
 

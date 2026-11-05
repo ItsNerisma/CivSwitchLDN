@@ -11,13 +11,17 @@ import trio
 
 import protocol
 import transport
+from connection import PLAYER_NAME
+
+CHAT_DELAY = 0.5
+MIN_DURATION = 30
 
 
 async def run(args, network):
     """Send the lobby handshake and chat while the LDN link is open."""
     host_ip = str(network.info().participants[0].ip_address)
     local_ip = str(network.participant().ip_address)
-    session = LobbySession(args, local_ip, host_ip, read_chat_lines(args))
+    session = LobbySession(local_ip, host_ip, read_chat_lines())
 
     await warmup_arp(args.ifname, local_ip, host_ip)
 
@@ -31,16 +35,15 @@ async def run(args, network):
 class LobbySession:
     """Own the handshake state, transport and scheduled chat messages."""
 
-    def __init__(self, args, local_ip, host_ip, chat_lines):
-        self.args = args
+    def __init__(self, local_ip, host_ip, chat_lines):
         self.host_ip = host_ip
         self.chat_lines = chat_lines
 
         # FireCONN carries the game's introduction inside an LDN F packet.
-        intro = protocol.introduction(identity=args.name, name=args.name)
-        body = protocol.connection_payload(host_ip, intro, ip_order=args.ip_order, pad=args.lobby_pad)
-        self.initial = protocol.ip_bytes(host_ip, args.ip_order) + b"F" + body
-        self.transport = transport.Transport(local_ip, host_ip, self.initial, ip_order=args.ip_order)
+        intro = protocol.introduction(identity=PLAYER_NAME, name=PLAYER_NAME)
+        body = protocol.connection_payload(host_ip, intro)
+        self.initial = protocol.ip_bytes(host_ip) + b"F" + body
+        self.transport = transport.Transport(local_ip, host_ip, self.initial)
 
         self.follow = deque()
         self.last_sent = None
@@ -49,7 +52,7 @@ class LobbySession:
 
     async def run(self, sock):
         # Allow every chat line plus the handshake and final linger to complete.
-        duration = max(self.args.duration, 15 + self.args.chat_delay * len(self.chat_lines))
+        duration = max(MIN_DURATION, 15 + CHAT_DELAY * len(self.chat_lines))
         start = next_attempt = time.monotonic()
         attempts = 0
 
@@ -96,10 +99,6 @@ class LobbySession:
         bodies, responses, detail = self.transport.receive(data)
         print(f"RX {detail}", flush=True)
 
-        if self.transport.learned_order:
-            print(f"[info] host uses {self.transport.learned_order} byte order", flush=True)
-            self.transport.learned_order = None
-
         for response in responses:
             await self.send(sock, response, "transport response")
 
@@ -134,7 +133,6 @@ class LobbySession:
     def schedule_messages(self, welcome):
         slot = struct.unpack_from("<I", welcome, 40)[0] if len(welcome) >= 44 else 1
         print(f"[info] assigned slot: {slot}", flush=True)
-        sender = 0 if self.args.chat_sender == "host" else slot
         now = time.monotonic()
 
         # Register with the game before injecting any chat messages.
@@ -146,9 +144,9 @@ class LobbySession:
 
         for i, line in enumerate(self.chat_lines):
             self.follow.append((
-                now + 2.0 + self.args.chat_delay * i,
+                now + 2.0 + CHAT_DELAY * i,
                 f"NetChat[{i + 1}/{len(self.chat_lines)}]",
-                lambda n, text=line: protocol.net_chat_public(n, text, sender),
+                lambda n, text=line: protocol.net_chat_public(n, text, slot),
             ))
         self.joined = True
 
@@ -157,17 +155,9 @@ class LobbySession:
         print(f"TX {reason} ({len(data)}B)", flush=True)
 
 
-def read_chat_lines(args):
-    if args.chat_stdin:
-        lines = sys.stdin.read().splitlines()
-    elif args.chat_file:
-        lines = args.chat_file.read_text(encoding="utf-8").splitlines()
-    elif args.chat:
-        lines = [args.chat]
-    else:
-        lines = []
-
-    return [line for line in lines if line.strip()]
+def read_chat_lines():
+    """Read the compressed chat lines supplied by run.js on stdin."""
+    return [line for line in sys.stdin.read().splitlines() if line.strip()]
 
 
 async def warmup_arp(device, local_ip, host_ip):

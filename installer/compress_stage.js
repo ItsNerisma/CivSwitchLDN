@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Gezine. See LICENSES/Gezine-MIT.txt.
 // Source: https://github.com/Gezine/CivSwitch/blob/3238a3e3340fd19a9dbd5cde56f3b50f9bc5d97f/installer-creator/compress_stage.js
 // compress_stage.js - max-compress a payload JS into the hex-transported
 // "stage" (inflate decoder + deflate(base64) + eval line). Self-contained:

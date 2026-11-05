@@ -18,10 +18,9 @@ SPECIAL = (1 << 64) - 1
 class Transport:
     """Ordered reliable delivery over UDP with F/R/V sequencing."""
 
-    def __init__(self, local_ip, host_ip, initial_packet, ip_order="reversed"):
+    def __init__(self, local_ip, host_ip, initial_packet):
         self.local_ip = local_ip
         self.host_ip = host_ip
-        self.ip_order = ip_order
         self.initial = initial_packet
         self.sent = {}
 
@@ -31,7 +30,6 @@ class Transport:
             self.next_seq = 1
 
         self.expected = 0
-        self.learned_order = None
         self.fresh = True
         self.pending = {}
         self.last_r = self.last_v = time.monotonic()
@@ -41,13 +39,9 @@ class Transport:
         if len(data) < 5:
             return [], [], "too short"
 
-        # The prefix names the recipient; learn the host's byte order if needed.
-        if data[:4] != protocol.ip_bytes(self.local_ip, self.ip_order):
-            other = "reversed" if self.ip_order == "network" else "network"
-            if data[:4] != protocol.ip_bytes(self.local_ip, other):
-                return [], [], "wrong destination"
-            self.ip_order = other
-            self.learned_order = other
+        # Civ VII stores the recipient's IPv4 bytes in reversed order.
+        if data[:4] != protocol.ip_bytes(self.local_ip):
+            return [], [], "wrong destination"
 
         kind, body = data[4:5], data[5:]
 
@@ -124,7 +118,7 @@ class Transport:
         return []
 
     def _packet(self, kind, body):
-        return protocol.ip_bytes(self.host_ip, self.ip_order) + kind + body
+        return protocol.ip_bytes(self.host_ip) + kind + body
 
     def _control(self, kind, sequence):
         return self._packet(kind, struct.pack("<Q", sequence))

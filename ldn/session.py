@@ -8,22 +8,17 @@ import trio
 import connection
 import lobby
 
+CONNECT_TIMEOUT = 10
+
 
 async def run(args):
     """Scan first, then keep the selected LDN connection open for the lobby."""
-    keys = connection.load_keys(args.keys, args.protocols)
+    keys = connection.load_keys(args.keys)
     found = await connection.scan(
         keys,
         phy=args.phy,
         ifname=args.ifname,
-        channels=args.channels,
-        protocols=args.protocols,
-        dwell=args.dwell,
-        rounds=args.rounds,
     )
-
-    if args.command == "scan":
-        return 0 if found else 1
 
     # Auto-selection is safe only when exactly one network was found.
     if args.host is None:
@@ -39,15 +34,13 @@ async def run(args):
     param = connection.build_connect_params(
         info,
         keys,
-        name=args.name,
-        passphrase_hex=connection.CIV7_PASSPHRASE_HEX,
         phy=args.phy,
         ifname=args.ifname,
     )
 
-    print(f"\nConnecting to {args.host}, name={args.name!r}", flush=True)
+    print(f"\nConnecting to {args.host}", flush=True)
 
-    with trio.fail_after(args.connect_timeout) as timeout:
+    with trio.fail_after(CONNECT_TIMEOUT) as timeout:
         async with ldn.connect(param) as network_obj:
             # The deadline covers association, not the chat session.
             timeout.deadline = math.inf

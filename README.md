@@ -50,6 +50,8 @@ Once the Remote JS Loader is running, send a JS file to the console IP shown on 
 node send_payload.js <console-ip> payloads/helloworld.js
 ```
 
+The JS file is optional (default: `payloads/helloworld.js`), as is a third port argument (default: `9026`).
+
 ## How it works
 
 `run.js` handles the sequence:
@@ -64,15 +66,26 @@ node send_payload.js <console-ip> payloads/helloworld.js
 ```text
 run.js              # Main flow and installer prompt
 compress.js         # Payload compression for chat delivery
-network.sh          # Temporary network suspension and restoration
-setup.sh            # Dependency and permission setup
 send_payload.js     # Optional JS payload sender
+bash/
+  network.sh        # Temporary network suspension and restoration
+  setup.sh          # Dependency and permission setup
 payloads/           # Gezine's exploit and an example payload
 installer/          # Persistent installer and save template
-ldn/                # LDN relative stuff
+ldn/                # LDN client, game protocol and transport
+LICENSES/           # Original licenses for the upstream components
+THIRD_PARTY_NOTICES.md # Reused files, sources and license scope
 ```
+
+## Licenses
+
+CivSwitchLDN as a combined application, and the original code contributed by ItsNerisma, are licensed under the **GNU GPL version 3 only (`GPL-3.0-only`)**. See [LICENSE](LICENSE). Copyright (c) 2026 ItsNerisma.
+
+The reused CivSwitch files retain **Gezine's MIT license and copyright**; they remain available separately under MIT. The **LDN library by Kinnay (Yannik Marchand)** is a GPLv3 dependency. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for file origins, adaptations and the preserved upstream notices.
+
+When redistributing the application, include its license and third-party notices. Binary or bundled releases must also provide access to the complete corresponding source under the GPLv3 terms, including any included GPL dependencies and the scripts needed to build and install them. The software is provided without warranty; see the license texts for the full terms.
 
 ## Credits
 
-- **[Gezine](https://github.com/Gezine)** for [CivSwitch](https://github.com/Gezine/CivSwitch), the exploit, Remote JS Loader and persistent installer. Reused files link to [their source version](https://github.com/Gezine/CivSwitch/tree/3238a3e3340fd19a9dbd5cde56f3b50f9bc5d97f). The original [MIT license](LICENSE) is included.
+- **[Gezine](https://github.com/Gezine)** for [CivSwitch](https://github.com/Gezine/CivSwitch), the exploit, Remote JS Loader and persistent installer. Reused files link to [their source version](https://github.com/Gezine/CivSwitch/tree/3238a3e3340fd19a9dbd5cde56f3b50f9bc5d97f).
 - **[Kinnay](https://github.com/kinnay)** for the [LDN library](https://github.com/kinnay/LDN), used as a Python dependency under GPL-3.0.

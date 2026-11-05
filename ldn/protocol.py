@@ -50,11 +50,11 @@ def introduction(identity="Civ7-PC", name="Civ7-PC", intro_id=0, field84=6, flag
     )
 
 
-def connection_payload(host_ip, local_intro, ip_order="reversed", pad=4, sequence=0):
+def connection_payload(host_ip, local_intro, sequence=0):
     """Build the initial FireCONN packet content."""
-    # The host IP is stored as an eight-byte prefix before the game marker.
-    prefix = struct.pack("<Q", int.from_bytes(ip_bytes(host_ip, ip_order), "little"))
-    payload = CONN + prefix + bytes(pad) + local_intro
+    # The FireCONN marker is followed by the host IP in an eight-byte field.
+    prefix = struct.pack("<Q", int.from_bytes(ip_bytes(host_ip), "little"))
+    payload = CONN + prefix + bytes(4) + local_intro
     return struct.pack("<Q", sequence) + payload
 
 
@@ -113,9 +113,9 @@ def describe(payload):
     return f"unknown ({len(payload)} bytes)"
 
 
-def ip_bytes(address, order="reversed"):
-    packed = ipaddress.IPv4Address(address).packed
-    return packed if order == "network" else packed[::-1]
+def ip_bytes(address):
+    """Encode an IPv4 address in the reversed byte order used by Civ VII."""
+    return ipaddress.IPv4Address(address).packed[::-1]
 
 
 def _text_block(text, allow_empty=False):

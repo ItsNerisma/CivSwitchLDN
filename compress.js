@@ -1,12 +1,11 @@
-#!/usr/bin/env node
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Gezine. See LICENSES/Gezine-MIT.txt.
 // Adapted from Gezine/CivSwitch: https://github.com/Gezine/CivSwitch/blob/3238a3e3340fd19a9dbd5cde56f3b50f9bc5d97f/PicoSwitch/compress.js
 // Compress a JS payload for Civ VII chat transport.
 // terser → deflateRaw → base25 → chunked img/onerror lines.
 //
-// Usage:  node compress.js [input.js]          → stdout
-//         require("./compress")(code)          → string[]
+// Usage: require("./compress")(code) → Promise<string[]>
 
-const fs = require("fs");
 const zlib = require("zlib");
 
 const MAX = 1000;
@@ -153,10 +152,3 @@ async function compress(source) {
 }
 
 module.exports = compress;
-
-if (require.main === module) {
-  const input = process.argv[2] || "payloads/core.js";
-  compress(fs.readFileSync(input, "utf8")).then((lines) => {
-    process.stdout.write(lines.map((l) => l + "\n").join(""));
-  });
-}

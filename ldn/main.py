@@ -14,14 +14,6 @@ def main(argv=None):
     cli = build_parser()
     args = cli.parse_args(argv)
 
-    try:
-        args.phy = connection.select_phy(args.phy)
-    except RuntimeError as e:
-        cli.error(str(e))
-
-    if args.command == "doctor":
-        return connection.doctor(args.phy, args.ifname, args.keys)
-
     errors = connection.hardware_check(args.phy, args.ifname)
     if errors:
         for e in errors:

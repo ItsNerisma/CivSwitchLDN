@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Gezine. See LICENSES/Gezine-MIT.txt.
 # Source: https://github.com/Gezine/CivSwitch/blob/3238a3e3340fd19a9dbd5cde56f3b50f9bc5d97f/installer-creator/install.py
 """install.py - one-shot CIV7 savefile-XSS installer.
 
