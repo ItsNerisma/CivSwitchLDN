@@ -24,6 +24,14 @@ def build_parser():
         metavar="MS",
         help="delay between chat messages in milliseconds (default: 10)",
     )
+    cli.add_argument(
+        "--handshake-scale",
+        type=float,
+        default=1.0,
+        dest="handshake_scale",
+        metavar="N",
+        help="multiply handshake delays by N (default: 1.0, e.g. 3 for slower networks)",
+    )
     return cli
 
 

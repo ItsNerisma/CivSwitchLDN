@@ -9,6 +9,7 @@
  *   --host <mac>        LDN host MAC when more than one network is found
  *   --switch-ip <ip>    Console's Wi-Fi IP; skips LAN discovery
  *   --chat-delay <ms>   Delay between chat messages in ms (default: 10)
+ *   --handshake-scale <n> Multiply handshake delays by n (default: 1.0)
  *   --verbose           Show LDN packet and diagnostic logs
  *   --help              Show a short usage summary
  */
@@ -28,7 +29,7 @@ const INSTALLER_PYTHON = path.join(__dirname, "ldn", ".venv", "bin", "python");
 async function main(args = process.argv.slice(2)) {
   const opts = parseArgs(args);
   if (opts.help) {
-    console.log("Usage: npm start -- [--keys path] [--phy radio] [--ifname name] [--host ldn-host-mac] [--switch-ip console-ip] [--chat-delay ms] [--verbose]");
+    console.log("Usage: npm start -- [--keys path] [--phy radio] [--ifname name] [--host ldn-host-mac] [--switch-ip console-ip] [--chat-delay ms] [--handshake-scale n] [--verbose]");
     return;
   }
 
@@ -67,6 +68,7 @@ async function injectViaLDN(opts) {
   ];
   if (opts.host) args.push("--host", opts.host);
   if (opts.chatDelay != null) args.push("--chat-delay", String(opts.chatDelay));
+  if (opts.handshakeScale != null) args.push("--handshake-scale", String(opts.handshakeScale));
   if (opts.verbose) args.push("--verbose");
   await runCommand("bash", args, lines.join("\n") + "\n");
 }
@@ -108,7 +110,7 @@ function parseArgs(args) {
   const opts = { keys: path.join(__dirname, "prod.keys"), ifname: "civ7-ldn" };
   const values = {
     "--keys": "keys", "--phy": "phy", "--ifname": "ifname",
-    "--host": "host", "--switch-ip": "switchIP", "--chat-delay": "chatDelay",
+    "--host": "host", "--switch-ip": "switchIP", "--chat-delay": "chatDelay", "--handshake-scale": "handshakeScale",
   };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];

@@ -44,12 +44,6 @@ npm start
 
 The output shows connection and delivery steps, with warnings and errors when needed. For packet traces and diagnostics, run `npm start -- --verbose`.
 
-To adjust the delay between chat messages (default: 10 ms):
-
-```sh
-npm start -- --chat-delay 50
-```
-
 ### 4. Persist the exploit (optional)
 
 After injection, the PC waits for the Remote JS Loader to respond on port 9026 before offering the persistent installer. Type **`y`** to install, or **`n`** to finish. If automatic discovery cannot identify the console, enter the IP displayed by the loader.
@@ -74,6 +68,26 @@ The JS file is optional (default: `payloads/helloworld.js`), as is a third port 
 2. Temporarily release Wi-Fi for LDN, scan nearby LDN networks, connect to the selected host, join its Civilization VII lobby and send the messages.
 3. Close the LDN connection and attempt to restore networking, including on failure or interruption.
 4. Wait for the Remote JS Loader on port 9026 after networking is restored, then offer Gezine's persistent installer.
+
+## Troubleshooting
+
+Use `--verbose` to see a timestamped trace of all packets exchanged with the lobby.
+
+```sh
+npm start -- --verbose
+```
+
+If the exploit fails on your hardware, try slowing down the handshake with `--handshake-scale` (default: 1.0). For example, `3` triples the delays between registration messages:
+
+```sh
+npm start -- --handshake-scale 3
+```
+
+You can adjust the delay between chat messages (default: 10 ms):
+
+```sh
+npm start -- --chat-delay 50
+```
 
 ## Project structure
 

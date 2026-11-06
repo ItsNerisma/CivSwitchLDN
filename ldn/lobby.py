@@ -15,6 +15,7 @@ import transport
 from connection import PLAYER_NAME
 
 DEFAULT_CHAT_DELAY_MS = 10
+DEFAULT_HANDSHAKE_SCALE = 1.0
 MIN_DURATION = 30
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,8 @@ async def run(args, network):
     host_ip = str(network.info().participants[0].ip_address)
     local_ip = str(network.participant().ip_address)
     chat_delay = getattr(args, "chat_delay_ms", DEFAULT_CHAT_DELAY_MS) / 1000
-    session = LobbySession(local_ip, host_ip, read_chat_lines(), chat_delay)
+    hs_scale = getattr(args, "handshake_scale", DEFAULT_HANDSHAKE_SCALE)
+    session = LobbySession(local_ip, host_ip, read_chat_lines(), chat_delay, hs_scale)
 
     await warmup_arp(args.ifname, local_ip, host_ip)
 
@@ -38,10 +40,14 @@ async def run(args, network):
 class LobbySession:
     """Own the handshake state, transport and scheduled chat messages."""
 
-    def __init__(self, local_ip, host_ip, chat_lines, chat_delay=DEFAULT_CHAT_DELAY_MS / 1000):
+    HANDSHAKE_DELAYS = (0.1, 0.2, 0.4)
+    CHAT_START_DELAY = 0.5
+
+    def __init__(self, local_ip, host_ip, chat_lines, chat_delay=DEFAULT_CHAT_DELAY_MS / 1000, hs_scale=DEFAULT_HANDSHAKE_SCALE):
         self.host_ip = host_ip
         self.chat_lines = chat_lines
         self.chat_delay = chat_delay
+        self.hs_scale = hs_scale
 
         # FireCONN carries the game's introduction inside an LDN F packet.
         intro = protocol.introduction(identity=PLAYER_NAME, name=PLAYER_NAME)
@@ -55,6 +61,7 @@ class LobbySession:
         self.received = 0
         self.chat_sent = 0
         self.progress_open = False
+        self.t0 = None
 
     async def run(self, sock):
         try:
@@ -62,9 +69,15 @@ class LobbySession:
         finally:
             self.finish_progress()
 
+    def elapsed(self):
+        if self.t0 is None:
+            return 0.0
+        return time.monotonic() - self.t0
+
     async def deliver(self, sock):
-        # Allow every chat line plus the handshake and final linger to complete.
-        duration = max(MIN_DURATION, 15 + self.chat_delay * len(self.chat_lines))
+        self.t0 = time.monotonic()
+        chat_start = self.CHAT_START_DELAY * self.hs_scale
+        duration = max(MIN_DURATION, 15 + chat_start + self.chat_delay * len(self.chat_lines))
         start = next_attempt = time.monotonic()
         attempts = 0
 
@@ -82,19 +95,18 @@ class LobbySession:
 
             await self.send_pending(sock)
 
-            # Keep the link open briefly after the last message for host replies.
-            linger_done = (
+            if (
                 self.last_sent is not None
                 and not self.follow
-                and time.monotonic() - self.last_sent >= 2.0
-            )
-            if linger_done:
+                and time.monotonic() - self.last_sent >= 1.0 * self.hs_scale
+            ):
                 break
         if not self.joined or self.follow or self.last_sent is None:
             self.finish_progress()
             message = "Payload delivery did not complete." if self.joined else "Timed out joining the game lobby."
             print(f"Error: {message}", file=sys.stderr, flush=True)
             return 3
+        logger.debug("[+%.3fs] Session complete: %s game messages received from host", self.elapsed(), self.received)
         print("Payload fully sent over LDN. Closing the wireless connection...", flush=True)
         return 0
 
@@ -109,7 +121,7 @@ class LobbySession:
 
         # The transport handles ordering and retransmissions before game parsing.
         bodies, responses, detail = self.transport.receive(data)
-        logger.debug("RX %s", detail)
+        logger.debug("[+%.3fs] RX %s", self.elapsed(), detail)
 
         for response in responses:
             await self.send(sock, response, "transport response")
@@ -117,7 +129,7 @@ class LobbySession:
         for body in bodies:
             self.received += 1
             description = protocol.describe(body)
-            logger.debug("Message: %s", description)
+            logger.debug("[+%.3fs] RX game: %s (%sB)", self.elapsed(), description, len(body))
 
             refused = body.startswith((protocol.REFUSED, protocol.CLOSE))
             rejected = description.startswith(("NetJoinRefused", "NetKicked"))
@@ -143,29 +155,34 @@ class LobbySession:
                 self.chat_sent += 1
                 self.show_progress()
             if not self.follow:
-                print("Payload sent. Keeping LDN open for 2 seconds for final replies and retransmissions...", flush=True)
+                print("Payload sent.", flush=True)
 
         for packet in self.transport.timers(time.monotonic()):
             await self.send(sock, packet, "keepalive R/V")
 
     def schedule_messages(self, welcome):
         slot = struct.unpack_from("<I", welcome, 40)[0] if len(welcome) >= 44 else 1
-        logger.debug("Assigned lobby slot: %s", slot)
+        logger.debug("[+%.3fs] Assigned lobby slot: %s", self.elapsed(), slot)
         print("Lobby joined.", flush=True)
         if self.chat_lines:
             self.show_progress()
         now = time.monotonic()
 
+        d1, d2, d3 = (d * self.hs_scale for d in self.HANDSHAKE_DELAYS)
+        chat_start = self.CHAT_START_DELAY * self.hs_scale
+
         # Register with the game before injecting any chat messages.
         self.follow.extend([
-            (now + 0.1, "NetRegister", protocol.net_register),
-            (now + 0.2, "NetAppRegister", lambda n: protocol.net_app_register(n, slot)),
-            (now + 0.4, "NetSnapshotProcessed", protocol.net_snapshot_processed),
+            (now + d1, "NetRegister", protocol.net_register),
+            (now + d2, "NetAppRegister", lambda n: protocol.net_app_register(n, slot)),
+            (now + d3, "NetSnapshotProcessed", protocol.net_snapshot_processed),
         ])
+        logger.debug("[+%.3fs] Handshake scheduled at +%.0f/+%.0f/+%.0fms (scale %.1fx), chat at +%.0fms",
+                     self.elapsed(), d1 * 1000, d2 * 1000, d3 * 1000, self.hs_scale, chat_start * 1000)
 
         for i, line in enumerate(self.chat_lines):
             self.follow.append((
-                now + 0.5 + self.chat_delay * i,
+                now + chat_start + self.chat_delay * i,
                 f"NetChat[{i + 1}/{len(self.chat_lines)}]",
                 lambda n, text=line: protocol.net_chat_public(n, text, slot),
             ))
@@ -189,7 +206,7 @@ class LobbySession:
 
     async def send(self, sock, data, reason):
         await sock.sendto(data, (self.host_ip, protocol.PORT))
-        logger.debug("TX %s (%sB)", reason, len(data))
+        logger.debug("[+%.3fs] TX %s (%sB)", self.elapsed(), reason, len(data))
 
 
 def read_chat_lines():
