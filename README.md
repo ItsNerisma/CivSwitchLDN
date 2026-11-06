@@ -43,6 +43,12 @@ npm start
 
 The output shows connection and delivery steps, with warnings and errors when needed. For packet traces and diagnostics, run `npm start -- --verbose`.
 
+To adjust the delay between chat messages (default: 10 ms):
+
+```sh
+npm start -- --chat-delay 50
+```
+
 ### 4. Persist the exploit (optional)
 
 After injection, the PC waits for the Remote JS Loader to respond on port 9026 before offering the persistent installer. Type **`y`** to install, or **`n`** to finish. If automatic discovery cannot identify the console, enter the IP displayed by the loader.

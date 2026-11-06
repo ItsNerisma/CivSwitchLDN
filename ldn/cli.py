@@ -16,6 +16,14 @@ def build_parser():
         type=_mac,
         help="host MAC; auto-selected when only one network is found",
     )
+    cli.add_argument(
+        "--chat-delay",
+        type=int,
+        default=10,
+        dest="chat_delay_ms",
+        metavar="MS",
+        help="delay between chat messages in milliseconds (default: 10)",
+    )
     return cli
 
 

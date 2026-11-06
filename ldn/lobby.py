@@ -14,7 +14,7 @@ import protocol
 import transport
 from connection import PLAYER_NAME
 
-CHAT_DELAY = 0.2
+DEFAULT_CHAT_DELAY_MS = 10
 MIN_DURATION = 30
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,8 @@ async def run(args, network):
     """Send the lobby handshake and chat while the LDN link is open."""
     host_ip = str(network.info().participants[0].ip_address)
     local_ip = str(network.participant().ip_address)
-    session = LobbySession(local_ip, host_ip, read_chat_lines())
+    chat_delay = getattr(args, "chat_delay_ms", DEFAULT_CHAT_DELAY_MS) / 1000
+    session = LobbySession(local_ip, host_ip, read_chat_lines(), chat_delay)
 
     await warmup_arp(args.ifname, local_ip, host_ip)
 
@@ -37,9 +38,10 @@ async def run(args, network):
 class LobbySession:
     """Own the handshake state, transport and scheduled chat messages."""
 
-    def __init__(self, local_ip, host_ip, chat_lines):
+    def __init__(self, local_ip, host_ip, chat_lines, chat_delay=DEFAULT_CHAT_DELAY_MS / 1000):
         self.host_ip = host_ip
         self.chat_lines = chat_lines
+        self.chat_delay = chat_delay
 
         # FireCONN carries the game's introduction inside an LDN F packet.
         intro = protocol.introduction(identity=PLAYER_NAME, name=PLAYER_NAME)
@@ -62,7 +64,7 @@ class LobbySession:
 
     async def deliver(self, sock):
         # Allow every chat line plus the handshake and final linger to complete.
-        duration = max(MIN_DURATION, 15 + CHAT_DELAY * len(self.chat_lines))
+        duration = max(MIN_DURATION, 15 + self.chat_delay * len(self.chat_lines))
         start = next_attempt = time.monotonic()
         attempts = 0
 
@@ -156,14 +158,14 @@ class LobbySession:
 
         # Register with the game before injecting any chat messages.
         self.follow.extend([
-            (now + 0.3, "NetRegister", protocol.net_register),
-            (now + 0.6, "NetAppRegister", lambda n: protocol.net_app_register(n, slot)),
-            (now + 1.0, "NetSnapshotProcessed", protocol.net_snapshot_processed),
+            (now + 0.1, "NetRegister", protocol.net_register),
+            (now + 0.2, "NetAppRegister", lambda n: protocol.net_app_register(n, slot)),
+            (now + 0.4, "NetSnapshotProcessed", protocol.net_snapshot_processed),
         ])
 
         for i, line in enumerate(self.chat_lines):
             self.follow.append((
-                now + 2.0 + CHAT_DELAY * i,
+                now + 0.5 + self.chat_delay * i,
                 f"NetChat[{i + 1}/{len(self.chat_lines)}]",
                 lambda n, text=line: protocol.net_chat_public(n, text, slot),
             ))
