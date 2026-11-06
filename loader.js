@@ -10,17 +10,25 @@ const SCAN_CONCURRENCY = 128;
 
 async function discoverLoader(phy, deadline = Infinity) {
   const candidates = localCandidates(phy);
-  const matches = [];
   let next = 0;
-  const workers = Array.from({ length: Math.min(SCAN_CONCURRENCY, candidates.length) }, async () => {
-    while (next < candidates.length && Date.now() < deadline) {
-      const ip = candidates[next++];
-      if (await probeLoader(ip, Math.min(PROBE_TIMEOUT, deadline - Date.now()))) matches.push(ip);
-    }
+  let done = false;
+
+  return new Promise((resolve) => {
+    const tick = async () => {
+      while (next < candidates.length && Date.now() < deadline && !done) {
+        const ip = candidates[next++];
+        if (await probeLoader(ip, Math.min(PROBE_TIMEOUT, deadline - Date.now()))) {
+          done = true;
+          return resolve([ip]);
+        }
+      }
+      if (!done && ++finished === total) resolve([]);
+    };
+    const total = Math.min(SCAN_CONCURRENCY, candidates.length);
+    if (!total) return resolve([]);
+    let finished = 0;
+    for (let i = 0; i < total; i++) tick();
   });
-  await Promise.all(workers);
-  // Finish the subnet before selecting a console: another loader may be present.
-  return next < candidates.length ? [] : matches;
 }
 
 function probeLoader(ip, timeout = PROBE_TIMEOUT) {

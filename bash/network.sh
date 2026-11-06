@@ -47,14 +47,18 @@ restore_connection() {
     while (( SECONDS < deadline )); do
         state="$(nmcli -g GENERAL.STATE device show "$device" 2>/dev/null || true)"
         state="${state%% *}"
+        
         current="$(nmcli -g GENERAL.CON-UUID device show "$device" 2>/dev/null || true)"
         address="$(nmcli -g IP4.ADDRESS device show "$device" 2>/dev/null || true)"
+
         if [[ "$state" == 100 && "$current" == "$conn" && -n "$address" ]]; then
             return 0
         fi
+
         if [[ "$state" == 30 || ( "$state" == 100 && "$current" != "$conn" ) ]]; then
             nmcli --wait 10 connection up uuid "$conn" ifname "$device" || true
         fi
+
         sleep 1
     done
     echo "[net] $device did not reconnect to $conn with an IPv4 address." >&2

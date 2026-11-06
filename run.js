@@ -70,7 +70,7 @@ async function injectViaLDN(opts) {
 }
 
 async function waitForLoader(opts, prompt) {
-  const deadline = Date.now() + 60000;
+  const deadline = Date.now() + 40000;
   console.log(`Waiting for the Remote JS Loader on port ${PORT}...`);
 
   while (Date.now() < deadline) {
@@ -78,11 +78,7 @@ async function waitForLoader(opts, prompt) {
       if (await probeLoader(opts.switchIP, Math.min(1500, deadline - Date.now()))) return opts.switchIP;
     } else {
       const matches = await discoverLoader(opts.phy, deadline);
-      if (matches.length === 1) return matches[0];
-      if (matches.length > 1) {
-        console.log(`Multiple loaders found: ${matches.join(", ")}.`);
-        opts.switchIP = await askSwitchIP(prompt);
-      }
+      if (matches.length) return matches[0];
     }
 
     const remaining = deadline - Date.now();
