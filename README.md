@@ -3,6 +3,12 @@
 > [!IMPORTANT]
 > **[CivSwitch](https://github.com/Gezine/CivSwitch) is an exploit by [Gezine](https://github.com/Gezine).** This project delivers it through local wireless (LDN) :heart:.
 
+## Demo (don't blink)
+
+No capture card, sorry 🫣​​
+
+https://github.com/user-attachments/assets/fefe32c0-e343-43c3-b716-296bd97ffa70
+
 ## Requirements
 
 - The **physical Switch 1 edition of Civilization VII, version 1.0.0**. See [CivSwitch](https://github.com/Gezine/CivSwitch#readme) for console firmware compatibility.
@@ -10,11 +16,6 @@
 - Node.js 18+, Python 3.12+ with `venv`, and `setcap` (`libcap2-bin` on Debian/Ubuntu).
 - A Switch 2, **on the same Wi-Fi network as the Linux system**.
 - **Your own `prod.keys`, dumped from your own Switch 1.** Place it at the repository root before running.
-
-## Why ?
-
-- No need for Pico, Android, ESP etc !
-- Whole payload sent in 4s instead of 15min+ :D
 
 ## Usage
 
