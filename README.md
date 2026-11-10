@@ -42,6 +42,8 @@ Leave the lobby open, then run:
 npm start
 ```
 
+You may be asked for your sudo password to control NetworkManager if your sudo session has expired.
+
 The output shows connection and delivery steps, with warnings and errors when needed. For packet traces and diagnostics, run `npm start -- --verbose`.
 
 ### 4. Persist the exploit (optional)

@@ -15,6 +15,7 @@ shift 2
 [[ -d "/sys/class/ieee80211/$phy" ]] || { echo "[net] Radio not found: $phy" >&2; exit 1; }
 [[ -x "$python_ldn" ]] || { echo "[net] Run setup first: npm install" >&2; exit 1; }
 command -v nmcli >/dev/null || { echo "[net] NetworkManager (nmcli) is required." >&2; exit 1; }
+command -v sudo >/dev/null || { echo "[net] sudo is required to control NetworkManager." >&2; exit 1; }
 
 # Discover interfaces belonging to this radio, without a machine-specific name.
 interfaces=()
@@ -56,7 +57,7 @@ restore_connection() {
         fi
 
         if [[ "$state" == 30 || ( "$state" == 100 && "$current" != "$conn" ) ]]; then
-            nmcli --wait 10 connection up uuid "$conn" ifname "$device" || true
+            sudo nmcli --wait 10 connection up uuid "$conn" ifname "$device" || true
         fi
 
         sleep 1
@@ -77,7 +78,7 @@ restore() {
         fi
     done
     if [[ "$networking" == enabled ]]; then
-        if nmcli networking on; then
+        if sudo nmcli networking on; then
             for i in "${!interfaces[@]}"; do
                 conn="${connections[i]}"
                 if [[ -n "$conn" && "$conn" != -- ]]; then
@@ -107,7 +108,7 @@ trap 'interrupt 130' INT
 trap 'interrupt 143' TERM
 
 echo "[net] Suspending NetworkManager for LDN on $phy."
-nmcli networking off || exit 1
+sudo nmcli networking off || exit 1
 for device in "${interfaces[@]}"; do
     link "$device" down || exit 1
 done
