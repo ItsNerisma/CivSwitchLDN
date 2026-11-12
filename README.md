@@ -29,7 +29,11 @@ Setup may ask for `sudo` to grant the Python helper its network permissions.
 
 ### 2. Setup the game
 
-On the Switch, open Civilization VII and go to **MULTIPLAYER > WIRELESS > CREATE GAME (R stick press) > HOST LOBBY (+)**
+On the Switch, open Civilization VII and 
+1. Go to "MULTIPLAYER" 
+2. Choose "WIRELESS" 
+3. Create a game *(R stick press)*
+4. Host a lobby *(+ button)*
 
 ### 3. Run the thing
 
