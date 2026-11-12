@@ -19,6 +19,7 @@ DEFAULT_HANDSHAKE_SCALE = 1.0
 MIN_DURATION = 30
 INSTALLER_PORT = 9027
 INSTALLER_CHUNK_SIZE = 1100
+INSTALLER_CHUNK_DELAY = 0.005
 INSTALLER_REPAIR_ROUNDS = 60
 INSTALLER_TIMEOUT = 180
 logger = logging.getLogger(__name__)
@@ -79,15 +80,23 @@ async def send_installer_over_ldn(ifname, local_ip, host_ip, template_b64, apply
 
         # Give the chat payload time to finish binding its UDP receiver.
         await trio.sleep(0.5)
+        total_chunks = len(template_chunks) + len(apply_chunks)
+        sent_chunks = 0
         for kind, chunks in (("J", apply_chunks), ("T", template_chunks)):
             for index in range(len(chunks)):
                 await sock.sendto(chunk_packet(kind, index), target)
-                await trio.sleep(0.001)
+                sent_chunks += 1
+                await trio.sleep(INSTALLER_CHUNK_DELAY)
 
-        print("Installer chunks sent; checking for missing data...", flush=True)
+        print(
+            f"Installer chunks sent ({sent_chunks}/{total_chunks}); checking for missing data...",
+            flush=True,
+        )
         transfer_complete = False
         install_status = None
         rounds = 0
+        requested_chunks = set()
+        retry_sends = 0
         deadline = time.monotonic() + INSTALLER_TIMEOUT
 
         while install_status is None and time.monotonic() < deadline:
@@ -124,12 +133,19 @@ async def send_installer_over_ldn(ifname, local_ip, host_ip, template_b64, apply
                         index = int(packet[1:])
                         chunks = template_chunks if kind == "T" else apply_chunks
                         if 0 <= index < len(chunks):
+                            requested_chunks.add((kind, index))
                             await sock.sendto(chunk_packet(kind, index), target)
-                            await trio.sleep(0.002)
+                            retry_sends += 1
+                            await trio.sleep(INSTALLER_CHUNK_DELAY)
                     except ValueError:
                         logger.debug("Ignoring malformed installer NAK: %r", packet)
 
         if install_status == "ok":
+            print(
+                f"Transfer recovered {len(requested_chunks)} missing chunk(s) "
+                f"with {retry_sends} retransmission(s).",
+                flush=True,
+            )
             print("Persistence installed over LDN (INSTALL DONE).", flush=True)
             return 0
         if install_status == "error":

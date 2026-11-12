@@ -25,7 +25,8 @@ are copied or adapted from CivSwitch and remain available separately under MIT:
 | `installer/save_template.bin` | `installer-creator/save_template.bin` |
 
 Local adaptations include a reusable compressor for LDN chat delivery, the
-repository's default installer payload path, and source/license annotations.
+repository's default installer payload path, Wi-Fi reconnection status messages
+in `payloads/core.js`, and source/license annotations.
 The exploit, Remote JS Loader and persistent installer originate from Gezine.
 Preserve Gezine's full MIT notice when redistributing these files or substantial
 portions of them, including compressed or generated copies.

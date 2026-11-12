@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
  * Inject CivSwitch over LDN, optionally install persistence over UDP/LDN, then
- * discover the Remote JS Loader on the restored Wi-Fi network.
+ * finish after persistence, or discover the loader when persistence is skipped.
  *
  * Usage: npm start -- [options]
  *   --keys <file>       Your prod.keys file (default: ./prod.keys)
  *   --phy <radio>       Wi-Fi radio (auto-detected if there is only one)
  *   --ifname <name>     Temporary LDN interface (default: civ7-ldn)
  *   --host <mac>        LDN host MAC when more than one network is found
- *   --switch-ip <ip>    Console's Wi-Fi IP; skips LAN discovery
+ *   --switch-ip <ip>    Console's Wi-Fi IP for the --no-persist loader scan
  *   --chat-delay <ms>   Delay between chat messages in ms (default: 10)
  *   --handshake-scale <n> Multiply handshake delays by n (default: 1.0)
  *   --no-persist        Skip automatic persistent installer
@@ -36,16 +36,21 @@ async function main(args = process.argv.slice(2)) {
     return;
   }
 
-  const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const prompt = opts.noPersist
+    ? readline.createInterface({ input: process.stdin, output: process.stdout })
+    : null;
   try {
     await injectViaLDN(opts);
-    opts.switchIP = await waitForLoader(opts, prompt);
-    console.log(`Remote JS Loader ready at ${opts.switchIP}:${PORT}`);
-    console.log(opts.noPersist
-      ? "Persistence was skipped (--no-persist)."
-      : "Persistence was installed during the LDN session.");
+    if (opts.noPersist) {
+      opts.switchIP = await waitForLoader(opts, prompt);
+      console.log(`Remote JS Loader ready at ${opts.switchIP}:${PORT}`);
+      console.log("Persistence was skipped (--no-persist).");
+    } else {
+      console.log("Persistence was installed during the LDN session.");
+      console.log("Skipping the loader scan; the console shows its IP if you want to send a payload now.");
+    }
   } finally {
-    prompt.close();
+    prompt?.close();
   }
   console.log("Done.");
 }
