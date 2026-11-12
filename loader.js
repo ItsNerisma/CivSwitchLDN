@@ -5,48 +5,69 @@ const os = require("os");
 const path = require("path");
 
 const PORT = 9026;
-const PROBE_TIMEOUT = 1500;
-const SCAN_CONCURRENCY = 128;
+const CONNECT_TIMEOUT = 450;
+const RESPONSE_TIMEOUT = 1000;
+const PROBE_TIMEOUT = CONNECT_TIMEOUT + RESPONSE_TIMEOUT;
+const SCAN_CONCURRENCY = 256;
 
 async function discoverLoader(phy, deadline = Infinity) {
   const candidates = localCandidates(phy);
-  let next = 0;
-  let done = false;
+  if (!candidates.length) return [];
 
-  return new Promise((resolve) => {
-    const tick = async () => {
-      while (next < candidates.length && Date.now() < deadline && !done) {
-        const ip = candidates[next++];
-        if (await probeLoader(ip, Math.min(PROBE_TIMEOUT, deadline - Date.now()))) {
-          done = true;
-          return resolve([ip]);
+  let next = 0;
+  let found = null;
+  const controller = new AbortController();
+  const workers = Math.min(SCAN_CONCURRENCY, candidates.length);
+
+  await Promise.all(Array.from({ length: workers }, async () => {
+    while (!found && next < candidates.length && Date.now() < deadline) {
+      const ip = candidates[next++];
+      const timeout = Math.min(PROBE_TIMEOUT, deadline - Date.now());
+      if (await probeLoader(ip, timeout, controller.signal)) {
+        if (!found) {
+          found = ip;
+          controller.abort();
         }
+        return;
       }
-      if (!done && ++finished === total) resolve([]);
-    };
-    const total = Math.min(SCAN_CONCURRENCY, candidates.length);
-    if (!total) return resolve([]);
-    let finished = 0;
-    for (let i = 0; i < total; i++) tick();
-  });
+    }
+  }));
+
+  return found ? [found] : [];
 }
 
-function probeLoader(ip, timeout = PROBE_TIMEOUT) {
-  if (timeout <= 0) return Promise.resolve(false);
+function probeLoader(ip, timeout = PROBE_TIMEOUT, signal) {
+  if (timeout <= 0 || signal?.aborted) return Promise.resolve(false);
   return new Promise((resolve) => {
     let response = "";
     let settled = false;
+    let timer;
+    const probeDeadline = Date.now() + timeout;
     const sock = net.createConnection({ host: ip, port: PORT });
     const finish = (found) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
       sock.destroy();
       resolve(found);
     };
-    // Bound the entire probe, including peers that keep sending unrelated data.
-    const timer = setTimeout(() => finish(false), timeout);
-    sock.once("connect", () => sock.end("1"));
+    const abort = () => finish(false);
+    const armTimeout = (limit) => {
+      clearTimeout(timer);
+      const remaining = probeDeadline - Date.now();
+      if (remaining <= 0) return finish(false);
+      timer = setTimeout(() => finish(false), Math.min(limit, remaining));
+    };
+
+    // Closed or filtered hosts get a short connect budget; a connected loader
+    // gets a separate response budget to execute the harmless probe expression.
+    signal?.addEventListener("abort", abort, { once: true });
+    armTimeout(CONNECT_TIMEOUT);
+    sock.once("connect", () => {
+      armTimeout(RESPONSE_TIMEOUT);
+      sock.end("1");
+    });
     sock.on("data", (chunk) => {
       response += chunk;
       if (response.includes("Executed successfully")) finish(true);

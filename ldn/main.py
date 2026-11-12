@@ -14,6 +14,12 @@ def main(argv=None):
     cli = build_parser()
     args = cli.parse_args(argv)
 
+    if bool(args.installer_template) != bool(args.installer_apply):
+        cli.error("--installer-template and --installer-apply must be used together")
+    for path in (args.installer_template, args.installer_apply):
+        if path is not None and not path.is_file():
+            cli.error(f"installer asset not found: {path}")
+
     errors = connection.hardware_check(args.phy, args.ifname)
     if errors:
         for e in errors:

@@ -1,7 +1,9 @@
-Persistent installer from [Gezine/CivSwitch](https://github.com/Gezine/CivSwitch/blob/3238a3e3340fd19a9dbd5cde56f3b50f9bc5d97f/installer-creator), commit `3238a3e3340fd19a9dbd5cde56f3b50f9bc5d97f`.
+Persistent installer adapted from [Gezine/CivSwitch](https://github.com/Gezine/CivSwitch/blob/3238a3e3340fd19a9dbd5cde56f3b50f9bc5d97f/installer-creator), commit `3238a3e3340fd19a9dbd5cde56f3b50f9bc5d97f`.
 
-`install.py` only adapts the default payload path to this repository. `compress_stage.js` and [save_template.bin](https://github.com/Gezine/CivSwitch/blob/3238a3e3340fd19a9dbd5cde56f3b50f9bc5d97f/installer-creator/save_template.bin) are included from the same version. Gezine's original MIT license is preserved in [LICENSES/Gezine-MIT.txt](../LICENSES/Gezine-MIT.txt).
+`install.py` retains the standalone TCP mode and adds asset generation for this repository's automatic LDN flow. `compress_stage.js` and [save_template.bin](https://github.com/Gezine/CivSwitch/blob/3238a3e3340fd19a9dbd5cde56f3b50f9bc5d97f/installer-creator/save_template.bin) are included from the same version. Gezine's original MIT license is preserved in [LICENSES/Gezine-MIT.txt](../LICENSES/Gezine-MIT.txt).
 
-The loader accepts about 500 KiB per connection. `install.py` encodes the save template as Base64 and uploads it in four separate chunks of at most 400,000 characters. Each chunk is kept in `window.__tpl` on the console. A final JS payload reassembles the template and writes the save.
+For the automatic LDN flow, `install.py --build-ldn-assets <output-dir>` prepares the Base64 save template and installer script. `run.js` injects the small receiver through lobby chat, then sends both assets as indexed chunks over UDP port 9027 while LDN is active. The receiver asks for missing chunks, installs the save, and starts the TCP Remote JS Loader on port 9026.
 
-The installer replaces the game's single-player saves. Run it through `npm start`, or use `ldn/.venv/bin/python installer/install.py <console-ip>` once the Remote JS Loader is ready.
+The installer replaces the game's single-player saves. Run it automatically through `npm start`, or use `ldn/.venv/bin/python installer/install.py <console-ip>` to install over the TCP loader after it is already running.
+
+The UDP transfer approach is adapted from [SeanHeuc's ESP32 CivSwitch port](https://github.com/SeanHeuc/CivSwitch/tree/main/esp32-ldn-civ7); see [the third-party notices](../THIRD_PARTY_NOTICES.md).

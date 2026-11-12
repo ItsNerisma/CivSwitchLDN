@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Compress and inject over LDN, wait for the Remote JS Loader, then install persistence.
+ * Inject CivSwitch over LDN, optionally install persistence over UDP/LDN, then
+ * discover the Remote JS Loader on the restored Wi-Fi network.
  *
  * Usage: npm start -- [options]
  *   --keys <file>       Your prod.keys file (default: ./prod.keys)
@@ -17,6 +18,7 @@
 const { spawn } = require("child_process");
 const fs = require("fs");
 const net = require("net");
+const os = require("os");
 const path = require("path");
 const readline = require("readline/promises");
 const { setTimeout: sleep } = require("timers/promises");
@@ -39,15 +41,9 @@ async function main(args = process.argv.slice(2)) {
     await injectViaLDN(opts);
     opts.switchIP = await waitForLoader(opts, prompt);
     console.log(`Remote JS Loader ready at ${opts.switchIP}:${PORT}`);
-
-    if (opts.noPersist) {
-      console.log("Skipping the persistent installer (--no-persist).");
-    } else {
-      console.log("Installing the persistent loader...");
-      await runCommand(INSTALLER_PYTHON, [
-        path.join(__dirname, "installer", "install.py"), opts.switchIP, String(PORT), PAYLOAD_PATH,
-      ]);
-    }
+    console.log(opts.noPersist
+      ? "Persistence was skipped (--no-persist)."
+      : "Persistence was installed during the LDN session.");
   } finally {
     prompt.close();
   }
@@ -61,18 +57,47 @@ async function injectViaLDN(opts) {
   const phy = selectPhy(opts.phy);
   opts.phy = phy;
   console.log("Preparing the payload...");
-  const lines = await compress(fs.readFileSync(PAYLOAD_PATH, "utf8"));
-  console.log(`Payload ready (${lines.length} chat messages).`);
-  const args = [
-    path.join(__dirname, "bash", "network.sh"), "--phy", phy,
-    PYTHON, path.join(__dirname, "ldn", "main.py"),
-    "--keys", path.resolve(opts.keys), "--phy", phy, "--ifname", opts.ifname,
-  ];
-  if (opts.host) args.push("--host", opts.host);
-  if (opts.chatDelay != null) args.push("--chat-delay", String(opts.chatDelay));
-  if (opts.handshakeScale != null) args.push("--handshake-scale", String(opts.handshakeScale));
-  if (opts.verbose) args.push("--verbose");
-  await runCommand("bash", args, lines.join("\n") + "\n");
+  const tempDir = opts.noPersist ? null : fs.mkdtempSync(path.join(os.tmpdir(), "civswitch-ldn-"));
+  try {
+    let source = fs.readFileSync(PAYLOAD_PATH, "utf8");
+    if (!opts.noPersist) {
+      source = addUdpInstallerReceiver(source);
+      await runCommand(INSTALLER_PYTHON, [
+        path.join(__dirname, "installer", "install.py"),
+        "--build-ldn-assets", tempDir, PAYLOAD_PATH,
+      ]);
+    }
+
+    const lines = await compress(source);
+    console.log(`Payload ready (${lines.length} chat messages${opts.noPersist ? ", loader only" : ", UDP installer receiver"}).`);
+    const args = [
+      path.join(__dirname, "bash", "network.sh"), "--phy", phy,
+      PYTHON, path.join(__dirname, "ldn", "main.py"),
+      "--keys", path.resolve(opts.keys), "--phy", phy, "--ifname", opts.ifname,
+    ];
+    if (opts.host) args.push("--host", opts.host);
+    if (opts.chatDelay != null) args.push("--chat-delay", String(opts.chatDelay));
+    if (opts.handshakeScale != null) args.push("--handshake-scale", String(opts.handshakeScale));
+    if (!opts.noPersist) {
+      args.push(
+        "--installer-template", path.join(tempDir, "template.b64"),
+        "--installer-apply", path.join(tempDir, "apply.b64"),
+      );
+    }
+    if (opts.verbose) args.push("--verbose");
+    await runCommand("bash", args, lines.join("\n") + "\n");
+  } finally {
+    if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function addUdpInstallerReceiver(source) {
+  const entry = "        remote_js_loader();";
+  if (source.split(entry).length !== 2) {
+    throw new Error("Could not locate the Remote JS Loader entry in payloads/core.js.");
+  }
+  const receiver = fs.readFileSync(path.join(__dirname, "installer", "udp_loader.js"), "utf8");
+  return source.replace(entry, receiver);
 }
 
 async function waitForLoader(opts, prompt) {
@@ -88,7 +113,7 @@ async function waitForLoader(opts, prompt) {
     }
 
     const remaining = deadline - Date.now();
-    if (remaining > 0) await sleep(Math.min(500, remaining));
+    if (remaining > 0) await sleep(Math.min(250, remaining));
   }
 
   if (!opts.switchIP) {

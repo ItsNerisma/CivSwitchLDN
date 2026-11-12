@@ -30,6 +30,16 @@ The exploit, Remote JS Loader and persistent installer originate from Gezine.
 Preserve Gezine's full MIT notice when redistributing these files or substantial
 portions of them, including compressed or generated copies.
 
+## UDP installer transfer — SeanHeuc's ESP32 CivSwitch port
+
+- Reference implementation: [SeanHeuc/CivSwitch `esp32-ldn-civ7`](https://github.com/SeanHeuc/CivSwitch/tree/main/esp32-ldn-civ7), especially [`tools/udp_loader.js`](https://github.com/SeanHeuc/CivSwitch/blob/main/esp32-ldn-civ7/tools/udp_loader.js) and [`main/installer.c`](https://github.com/SeanHeuc/CivSwitch/blob/main/esp32-ldn-civ7/main/installer.c).
+- `installer/udp_loader.js` adapts its UDP-over-LDN transfer approach: indexed template/script chunks, requests for missing chunks, and installation before switching to the TCP loader.
+- SeanHeuc's project carries the CivSwitch MIT license and retains Gezine's copyright notice; the full MIT notice above applies to the reused/adapted CivSwitch portions.
+
+The adaptation for this repository adds the PC-side UDP sender and an explicit
+installation result acknowledgement. The transfer design is credited to
+SeanHeuc; the exploit and save installer remain from Gezine.
+
 ## LDN — Kinnay (Yannik Marchand) — GPLv3
 
 - Upstream: [kinnay/LDN](https://github.com/kinnay/LDN).

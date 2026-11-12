@@ -11,6 +11,8 @@ def build_parser():
     cli.add_argument("--phy", required=True, help="Wi-Fi radio selected by run.js")
     cli.add_argument("--ifname", default="civ7-ldn")
     cli.add_argument("--verbose", action="store_true", help="show packet and diagnostic logs")
+    cli.add_argument("--installer-template", type=Path, help="Base64 save template for the UDP LDN installer")
+    cli.add_argument("--installer-apply", type=Path, help="Base64 installer script for the UDP LDN installer")
     cli.add_argument(
         "--host",
         type=_mac,
