@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Compress and inject over LDN, wait for the Remote JS Loader, then offer the installer.
+ * Compress and inject over LDN, wait for the Remote JS Loader, then install persistence.
  *
  * Usage: npm start -- [options]
  *   --keys <file>       Your prod.keys file (default: ./prod.keys)
@@ -10,6 +10,7 @@
  *   --switch-ip <ip>    Console's Wi-Fi IP; skips LAN discovery
  *   --chat-delay <ms>   Delay between chat messages in ms (default: 10)
  *   --handshake-scale <n> Multiply handshake delays by n (default: 1.0)
+ *   --no-persist        Skip automatic persistent installer
  *   --verbose           Show LDN packet and diagnostic logs
  *   --help              Show a short usage summary
  */
@@ -29,7 +30,7 @@ const INSTALLER_PYTHON = path.join(__dirname, "ldn", ".venv", "bin", "python");
 async function main(args = process.argv.slice(2)) {
   const opts = parseArgs(args);
   if (opts.help) {
-    console.log("Usage: npm start -- [--keys path] [--phy radio] [--ifname name] [--host ldn-host-mac] [--switch-ip console-ip] [--chat-delay ms] [--handshake-scale n] [--verbose]");
+    console.log("Usage: npm start -- [--keys path] [--phy radio] [--ifname name] [--host ldn-host-mac] [--switch-ip console-ip] [--chat-delay ms] [--handshake-scale n] [--no-persist] [--verbose]");
     return;
   }
 
@@ -39,8 +40,9 @@ async function main(args = process.argv.slice(2)) {
     opts.switchIP = await waitForLoader(opts, prompt);
     console.log(`Remote JS Loader ready at ${opts.switchIP}:${PORT}`);
 
-    const answer = await prompt.question("Run the persistent installer? [y/N] ");
-    if (answer.trim().toLowerCase() === "y") {
+    if (opts.noPersist) {
+      console.log("Skipping the persistent installer (--no-persist).");
+    } else {
       console.log("Installing the persistent loader...");
       await runCommand(INSTALLER_PYTHON, [
         path.join(__dirname, "installer", "install.py"), opts.switchIP, String(PORT), PAYLOAD_PATH,
@@ -121,6 +123,8 @@ function parseArgs(args) {
       opts[values[arg]] = args[++i];
     } else if (arg === "--help" || arg === "-h") {
       opts.help = true;
+    } else if (arg === "--no-persist") {
+      opts.noPersist = true;
     } else if (arg === "--verbose") {
       opts.verbose = true;
     } else {

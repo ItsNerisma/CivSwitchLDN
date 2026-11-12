@@ -46,11 +46,11 @@ You may be asked for your sudo password to control NetworkManager if your sudo s
 
 The output shows connection and delivery steps, with warnings and errors when needed. For packet traces and diagnostics, run `npm start -- --verbose`.
 
-### 4. Persist the exploit (optional)
+### 4. Install persistence automatically
 
-After injection, the PC waits for the Remote JS Loader to respond on port 9026 before offering the persistent installer. Type **`y`** to install, or **`n`** to finish. If automatic discovery cannot identify the console, enter the IP displayed by the loader.
+After injection, the PC waits for the Remote JS Loader to respond on port 9026, then runs the persistent installer automatically. If automatic discovery cannot identify the console, enter the IP displayed by the loader. To skip persistence for a run, use `npm start -- --no-persist`.
 
-It will replace the game's single-player saves. Keep the game open until it prints **`INSTALL DONE`**. Afterwards, restart the game and select **Load Game** to start the loader again :tada:.
+The installer replaces the game's single-player saves. Keep the game open until it prints **`INSTALL DONE`**. Afterwards, restart the game and select **Load Game** to start the loader again :tada:.
 
 ### Send JS payloads
 
@@ -69,7 +69,7 @@ The JS file is optional (default: `payloads/helloworld.js`), as is a third port 
 1. Compress `payloads/core.js` into 19 chat messages.
 2. Temporarily release Wi-Fi for LDN, scan nearby LDN networks, connect to the selected host, join its Civilization VII lobby and send the messages.
 3. Close the LDN connection and attempt to restore networking, including on failure or interruption.
-4. Wait for the Remote JS Loader on port 9026 after networking is restored, then offer Gezine's persistent installer.
+4. Wait for the Remote JS Loader on port 9026 after networking is restored, then automatically run Gezine's persistent installer unless `--no-persist` was passed.
 
 ## Troubleshooting
 
