@@ -34,6 +34,8 @@ const F_OpenFile    = sdk_base + 0xa78a0n;
 const F_CloseFile   = sdk_base + 0xa5a70n;
 const F_WriteFile   = sdk_base + 0xa5e00n;
 const F_SetFileSize = sdk_base + 0xa6020n;
+const F_GetFileSize = sdk_base + 0xa6120n;
+const F_ReadFileSizeOut = sdk_base + 0xa5d70n;
 const F_Commit      = sdk_base + 0xa7de0n;
 const F_DeleteFile  = sdk_base + 0xa6710n;
 const F_CreateDir   = sdk_base + 0xa6890n;
@@ -78,6 +80,229 @@ function sfx_listDir(path) {
     call_rop(F_CloseDir, read64(sfx_dh));
     return out;
 }
+// Apply this once during persistence installation, not on each core startup.
+const SFX_MAX_APP_OPTIONS_SIZE = 0x10000n;
+const SFX_READ_CHUNK_SIZE = 0x300;
+const SFX_APP_OPTIONS_PATH = "save:/saves/AppOptions.txt";
+
+function sfx_alloc(allocations, size) {
+    const addr = malloc(size);
+    if (addr === 0n) throw new Error("AppOptions buffer allocation failed");
+    allocations.push(addr);
+    return addr;
+}
+
+function sfx_closeAppOptionsHandle(handle) {
+    if (handle === 0n) return true;
+    try {
+        call_rop(F_CloseFile, handle);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+function sfx_freeAppOptionsAllocations(allocations) {
+    let success = true;
+    for (let i = allocations.length - 1; i >= 0; i--) {
+        try {
+            free(allocations[i]);
+        } catch (error) {
+            success = false;
+        }
+    }
+    return success;
+}
+
+function sfx_findIntroOptionPatch() {
+    const allocations = [];
+    let fileHandle = 0n;
+    let foundPatch = null;
+    let cleanupSucceeded = true;
+    try {
+        const pathBuffer = sfx_alloc(allocations, 0x100);
+        const handleOut = sfx_alloc(allocations, 8);
+        const sizeOut = sfx_alloc(allocations, 8);
+        const readCountOut = sfx_alloc(allocations, 8);
+        const readBuffer = sfx_alloc(allocations, SFX_READ_CHUNK_SIZE + 16);
+
+        write_string(pathBuffer, SFX_APP_OPTIONS_PATH);
+        write64(handleOut, 0n);
+        if (call_rop(F_OpenFile, handleOut, pathBuffer, 1n) !== 0n) return null;
+        fileHandle = read64(handleOut);
+        if (fileHandle === 0n) return null;
+
+        write64(sizeOut, 0n);
+        if (call_rop(F_GetFileSize, sizeOut, fileHandle) !== 0n) return null;
+
+        const fileSize = read64(sizeOut);
+        if (fileSize === 0n || fileSize > SFX_MAX_APP_OPTIONS_SIZE) return null;
+
+        let readOffset = 0n;
+        let pendingText = "";
+        let pendingOffset = 0;
+        let section = "";
+
+        function inspectLine(line, lineOffset) {
+            const sectionMatch = line.trim().match(/^\[([^\]]+)\]$/);
+            if (sectionMatch) {
+                section = sectionMatch[1].toLowerCase();
+                return null;
+            }
+            if (section !== "shell") return null;
+
+            const optionMatch = /^([ \t]*)(;[ \t]*)?(ShowIntroSequences)([ \t]+)([^\s;]+)([ \t]*(?:;.*)?)$/i.exec(line);
+            if (!optionMatch) return null;
+
+            const activePrefix = optionMatch[2]
+                ? optionMatch[2].slice(1)
+                : "";
+            const extraPadding = optionMatch[2] ? 1 : 0;
+            const value = "0" + " ".repeat(optionMatch[5].length - 1 + extraPadding);
+            const updatedLine = optionMatch[1] + activePrefix + optionMatch[3] +
+                optionMatch[4] + value + optionMatch[6];
+            if (updatedLine.length !== line.length) return null;
+
+            const originalLineBytes = sfx_toBytes(line);
+            const updatedLineBytes = sfx_toBytes(updatedLine);
+            if (originalLineBytes === null || updatedLineBytes === null) return null;
+            return { offset: BigInt(lineOffset), originalLineBytes, updatedLineBytes };
+        }
+
+        while (readOffset < fileSize) {
+            const remaining = Number(fileSize - readOffset);
+            const requested = Math.min(SFX_READ_CHUNK_SIZE, remaining);
+            write64(readCountOut, 0n);
+            const result = call_rop(F_ReadFileSizeOut, readCountOut, fileHandle,
+                readOffset, readBuffer, BigInt(requested));
+            if (result !== 0n) return null;
+
+            const count = Number(read64(readCountOut));
+            if (!Number.isInteger(count) || count <= 0 || count > requested) return null;
+
+            const chunk = read_buffer(readBuffer, count);
+            const chunkText = String.fromCharCode.apply(null, chunk);
+            const combinedText = pendingText + chunkText;
+            let cursor = 0;
+
+            while (cursor < combinedText.length) {
+                const lf = combinedText.indexOf("\n", cursor);
+                const cr = combinedText.indexOf("\r", cursor);
+                let lineEnd = -1;
+                if (lf >= 0 && cr >= 0) lineEnd = Math.min(lf, cr);
+                else lineEnd = Math.max(lf, cr);
+                if (lineEnd < 0) break;
+
+                const line = combinedText.slice(cursor, lineEnd);
+                let delimiterSize = 1;
+                if (combinedText[lineEnd] === "\r" && combinedText[lineEnd + 1] === "\n")
+                    delimiterSize = 2;
+
+                const patch = inspectLine(line, pendingOffset + cursor);
+                if (patch !== null) {
+                    foundPatch = patch;
+                    break;
+                }
+                cursor = lineEnd + delimiterSize;
+            }
+
+            if (foundPatch !== null) break;
+            pendingText = combinedText.slice(cursor);
+            pendingOffset += cursor;
+            readOffset += BigInt(count);
+        }
+
+        if (foundPatch === null && pendingText.length > 0)
+            foundPatch = inspectLine(pendingText, pendingOffset);
+        if (foundPatch !== null) {
+            if (sfx_closeAppOptionsHandle(fileHandle)) fileHandle = 0n;
+            else foundPatch = null;
+        }
+    } catch (error) {
+        foundPatch = null;
+    } finally {
+        if (fileHandle !== 0n) {
+            const handleToClose = fileHandle;
+            fileHandle = 0n;
+            if (!sfx_closeAppOptionsHandle(handleToClose)) cleanupSucceeded = false;
+        }
+        if (!sfx_freeAppOptionsAllocations(allocations)) cleanupSucceeded = false;
+    }
+    return cleanupSucceeded ? foundPatch : null;
+}
+
+function sfx_toBytes(text) {
+    const bytes = new Uint8Array(text.length);
+    for (let i = 0; i < text.length; i++) {
+        const value = text.charCodeAt(i);
+        if (value > 0xff) return null;
+        bytes[i] = value;
+    }
+    return bytes;
+}
+
+function sfx_restoreIntroOption(handle, patch, buffer, writeOption) {
+    try {
+        const result = call_rop(F_WriteFile, handle, patch.offset, buffer,
+            BigInt(patch.originalLineBytes.length), writeOption);
+        if (result === 0n) return true;
+        return false;
+    } catch (error) {
+        return false;
+    }
+}
+
+function sfx_disableIntroCinematics() {
+    const patch = sfx_findIntroOptionPatch();
+    if (patch === null) return false;
+
+    const allocations = [];
+    let fileHandle = 0n;
+    let originalBuffer = 0n;
+    let writeOption = 0n;
+    let writeAttempted = false;
+    let writeSucceeded = false;
+    try {
+        const pathBuffer = sfx_alloc(allocations, 0x100);
+        const handleOut = sfx_alloc(allocations, 8);
+        const outputBuffer = sfx_alloc(allocations, patch.updatedLineBytes.length);
+        originalBuffer = sfx_alloc(allocations, patch.originalLineBytes.length);
+        writeOption = sfx_alloc(allocations, 8);
+
+        write_string(pathBuffer, SFX_APP_OPTIONS_PATH);
+        write_buffer(outputBuffer, patch.updatedLineBytes);
+        write_buffer(originalBuffer, patch.originalLineBytes);
+        write32(writeOption, 1n);
+
+        write64(handleOut, 0n);
+        if (call_rop(F_OpenFile, handleOut, pathBuffer, 3n) === 0n) {
+            fileHandle = read64(handleOut);
+            if (fileHandle !== 0n) {
+                writeAttempted = true;
+                const writeResult = call_rop(F_WriteFile, fileHandle, patch.offset,
+                    outputBuffer, BigInt(patch.updatedLineBytes.length), writeOption);
+                if (writeResult === 0n) {
+                    writeSucceeded = sfx_closeAppOptionsHandle(fileHandle);
+                    if (writeSucceeded) fileHandle = 0n;
+                } else {
+                    sfx_restoreIntroOption(fileHandle, patch, originalBuffer, writeOption);
+                }
+            }
+        }
+    } catch (error) {
+        if (writeAttempted && fileHandle !== 0n && originalBuffer !== 0n && writeOption !== 0n)
+            sfx_restoreIntroOption(fileHandle, patch, originalBuffer, writeOption);
+    } finally {
+        if (fileHandle !== 0n) {
+            const handleToClose = fileHandle;
+            fileHandle = 0n;
+            if (!sfx_closeAppOptionsHandle(handleToClose)) writeSucceeded = false;
+        }
+        if (!sfx_freeAppOptionsAllocations(allocations)) writeSucceeded = false;
+    }
+    return writeSucceeded;
+}
+
 function sfx_b64dec(s) {
     const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     const m = {};
@@ -159,13 +384,23 @@ sfx_writePath(text_encode("save:/saves/Single/XSTRIG.Civ7Save"));
 call_rop(F_CreateFile, sfx_pb, BigInt(newSize));
 const r2 = call_rop(F_OpenFile, sfx_h, sfx_pb, 6n);
 if (r2 !== 0n) { await log("E: open XSTRIG " + toHex(r2)); return; }
-call_rop(F_SetFileSize, read64(sfx_h), BigInt(newSize));
+const r3 = call_rop(F_SetFileSize, read64(sfx_h), BigInt(newSize));
+if (r3 !== 0n) {
+    call_rop(F_CloseFile, read64(sfx_h));
+    await log("E: resize XSTRIG " + toHex(r3));
+    return;
+}
 const r4 = call_rop(F_WriteFile, read64(sfx_h), 0n, out, BigInt(newSize), sfx_wo);
 call_rop(F_CloseFile, read64(sfx_h));
 if (r4 !== 0n) { await log("E: write " + toHex(r4)); return; }
 
+const appOptionsWriteSucceeded = sfx_disableIntroCinematics();
 sfx_writePath(text_encode("save"));
 const cr = call_rop(F_Commit, sfx_pb);
+const introCinematicsDisabled = cr === 0n && appOptionsWriteSucceeded === true;
+await log(introCinematicsDisabled
+    ? "Introduction's cinematics disabled"
+    : "Could not disable introduction's cinematics");
 if (cr !== 0n) { await log("E: commit " + toHex(cr)); return; }
 window.__civswitchPersistOK = true;
 await log("INSTALL DONE - reboot, Load Game");
