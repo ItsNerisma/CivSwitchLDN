@@ -50,7 +50,7 @@ async def run(args, network):
 
 
 async def send_installer_over_ldn(ifname, local_ip, host_ip, template_b64, apply_b64):
-    """Stream the installer on LDN UDP :9027 and repair chunks the console missed."""
+    """Stream installer data, repair missed chunks, and return when all arrive."""
     template_chunks = [template_b64[i:i + INSTALLER_CHUNK_SIZE]
                        for i in range(0, len(template_b64), INSTALLER_CHUNK_SIZE)]
     apply_chunks = [apply_b64[i:i + INSTALLER_CHUNK_SIZE]
@@ -92,7 +92,6 @@ async def send_installer_over_ldn(ifname, local_ip, host_ip, template_b64, apply
             f"Installer chunks sent ({sent_chunks}/{total_chunks}); checking for missing data...",
             flush=True,
         )
-        transfer_complete = False
         install_status = None
         rounds = 0
         requested_chunks = set()
@@ -100,14 +99,11 @@ async def send_installer_over_ldn(ifname, local_ip, host_ip, template_b64, apply
         deadline = time.monotonic() + INSTALLER_TIMEOUT
 
         while install_status is None and time.monotonic() < deadline:
-            if not transfer_complete:
-                if rounds >= INSTALLER_REPAIR_ROUNDS:
-                    break
-                await sock.sendto(b"G", target)
-                rounds += 1
-                receive_window = 0.15
-            else:
-                receive_window = 1.0
+            if rounds >= INSTALLER_REPAIR_ROUNDS:
+                break
+            await sock.sendto(b"G", target)
+            rounds += 1
+            receive_window = 0.15
 
             window_end = min(deadline, time.monotonic() + receive_window)
             while install_status is None and time.monotonic() < window_end:
@@ -120,9 +116,13 @@ async def send_installer_over_ldn(ifname, local_ip, host_ip, template_b64, apply
                     continue
 
                 if packet == b"D":
-                    if not transfer_complete:
-                        print("Console received all installer chunks; installing...", flush=True)
-                    transfer_complete = True
+                    print("Console received all installer chunks; installing locally.", flush=True)
+                    print(
+                        f"Transfer recovered {len(requested_chunks)} missing chunk(s) "
+                        f"with {retry_sends} retransmission(s).",
+                        flush=True,
+                    )
+                    return 0
                 elif packet == b"I:OK":
                     install_status = "ok"
                 elif packet == b"I:ERR":
@@ -146,13 +146,11 @@ async def send_installer_over_ldn(ifname, local_ip, host_ip, template_b64, apply
                 f"with {retry_sends} retransmission(s).",
                 flush=True,
             )
-            print("Persistence installed over LDN (INSTALL DONE).", flush=True)
+            print("Console confirmed installation complete (INSTALL DONE).", flush=True)
             return 0
         if install_status == "error":
             raise RuntimeError("The console reported that the persistence installer failed.")
-        if not transfer_complete:
-            raise RuntimeError("Timed out repairing installer chunks over LDN.")
-        raise RuntimeError("Timed out waiting for INSTALL DONE from the console.")
+        raise RuntimeError("Timed out receiving installer completion from the console.")
 
 
 class LobbySession:

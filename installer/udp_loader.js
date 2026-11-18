@@ -104,8 +104,7 @@ async function core_udp_loader() {
         const installed = window.__civswitchPersistOK === true;
         udp_tx(installed ? "I:OK" : "I:ERR");
         await log(installed ? "INSTALLER RETURNED" : "INSTALLER FAILED");
-        await log("leaving ldn network.");
-        await log("switching to TCP loader :9026");
+        await log("Starting Wi-Fi loader on TCP port 9026.");
         await remote_js_loader();
     }
 

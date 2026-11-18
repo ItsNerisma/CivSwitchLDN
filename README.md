@@ -38,7 +38,7 @@ On the Switch, open Civilization VII and
 ### 3. Run the thing
 
 > [!IMPORTANT]
-> NetworkManager will **temporarily disable all managed network connections** while the payload and installer are sent over LDN. Afterwards, the script restores the previous Wi-Fi connection. In `--no-persist` mode it also waits for an IPv4 address before looking for the Remote JS Loader. If restoration fails, reconnect Wi-Fi manually before using the loader.
+> NetworkManager temporarily disables all managed network connections while the payload and installer data travel over LDN. When the console confirms receipt of every installer chunk, the script closes LDN and restores the previous Wi-Fi connection while the console installs locally. In `--no-persist` mode, the script also waits for an IPv4 address before searching for the Remote JS Loader. Reconnect Wi-Fi manually if it does not return.
 
 Leave the lobby open, then run:
 
@@ -52,11 +52,11 @@ The output shows connection and delivery steps, with warnings and errors when ne
 
 ### 4. Install persistence during injection
 
-By default, the initial LDN payload includes a small UDP receiver. While the LDN session is still active, the PC streams the installer and save template to the console in chunks over **UDP port 9027**; missing chunks are requested again automatically. After installing persistence, the console starts the regular Remote JS Loader on **TCP port 9026**. The PC restores its Wi-Fi connection and finishes without waiting for or scanning for the loader. To skip persistence, leave the loader running, and discover its IP immediately, use `npm start -- --no-persist`.
+By default, the initial LDN payload includes a UDP receiver. The PC sends the installer and save template in chunks over **UDP port 9027**. The receiver requests missing chunks and signals when it has received them all. The PC then closes LDN and restores Wi-Fi while the console installs the save from memory. The console starts the Remote JS Loader on **TCP port 9026**.
 
-The ports serve different stages: UDP `9027` is a temporary bulk-transfer channel over LDN, while TCP `9026` is the loader used for later JS payloads over Wi-Fi.
+Keep the game open until **`INSTALL DONE`** appears. In persistence mode, `npm start` can return while the console is still installing because it waits only for Wi-Fi restoration. The installer replaces the game's single-player saves. After `INSTALL DONE`, restart the game and select **Load Game** to start the loader again. To skip persistence and discover the loader's IP automatically, run `npm start -- --no-persist`.
 
-The installer replaces the game's single-player saves. Keep the game open until it prints **`INSTALL DONE`**. Afterwards, restart the game and select **Load Game** to start the loader again :tada:.
+UDP `9027` carries installer data over LDN. TCP `9026` receives later JS payloads over Wi-Fi.
 
 ### Send JS payloads
 
@@ -70,13 +70,13 @@ The JS file is optional (default: `payloads/helloworld.js`), as is a third port 
 
 ## How it works
 
-`run.js` handles the sequence:
+[run.js](run.js) handles the sequence:
 
-1. Add the small UDP installer receiver to `payloads/core.js` (unless `--no-persist` was passed), then compress it into chat messages. The large save template and installer script are prepared separately.
+1. Add the small UDP installer receiver to [payloads/core.js](payloads/core.js) (unless `--no-persist` was passed), then compress it into chat messages. The large save template and installer script are prepared separately.
 2. Temporarily release Wi-Fi for LDN, scan nearby LDN networks, connect to the selected host, join its Civilization VII lobby and send the messages.
-3. While the LDN connection remains active, send the save template and installer script over UDP `9027`; the console requests retransmission of any missing chunks and confirms the installation result.
-4. Close the LDN connection and attempt to restore networking, including on failure or interruption.
-5. The console starts the Remote JS Loader on TCP `9026`. In persistence mode, finish after restoring the PC's network; in `--no-persist` mode, discover the loader IP.
+3. Send the save template and installer script over UDP `9027`. The console requests missing chunks and confirms when it has received them all.
+4. Close LDN and restore networking. The console installs from memory and reports `INSTALL DONE` when it finishes.
+5. The console starts the Remote JS Loader on TCP `9026`. In persistence mode, the PC finishes after restoring networking; in `--no-persist` mode, discover the loader IP.
 
 ## Troubleshooting
 

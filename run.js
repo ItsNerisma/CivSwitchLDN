@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Inject CivSwitch over LDN, optionally install persistence over UDP/LDN, then
- * finish after persistence, or discover the loader when persistence is skipped.
+ * Inject CivSwitch over LDN, optionally transfer the persistence installer,
+ * then restore Wi-Fi while the console installs it locally.
  *
  * Usage: npm start -- [options]
  *   --keys <file>       Your prod.keys file (default: ./prod.keys)
@@ -46,8 +46,7 @@ async function main(args = process.argv.slice(2)) {
       console.log(`Remote JS Loader ready at ${opts.switchIP}:${PORT}`);
       console.log("Persistence was skipped (--no-persist).");
     } else {
-      console.log("Persistence was installed during the LDN session.");
-      console.log("Skipping the loader scan; the console shows its IP if you want to send a payload now.");
+      console.log("Installer data was transferred. Wait for INSTALL DONE on the console.");
     }
   } finally {
     prompt?.close();

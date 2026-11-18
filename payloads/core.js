@@ -1275,7 +1275,7 @@
                 let announced = false;
                 while (current_ip === null) {
                     if (!announced) {
-                        await log("leaving LDN - waiting for Wi-Fi network..");
+                        await log("Waiting for Wi-Fi network...");
                         announced = true;
                     }
                     await sleep(500);
